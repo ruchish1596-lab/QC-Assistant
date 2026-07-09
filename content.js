@@ -1,6 +1,6 @@
-console.log("QC Assistant DEV3 Clean Loaded");
+console.log("QC Assistant DEV3 FINAL Loaded");
 
-const QC_VERSION = "3.0.6-dev3-clean";
+const QC_VERSION = "3.1.0-dev3-final";
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function cleanText(text = "") {
@@ -116,29 +116,65 @@ function getEditRoot() {
 
 function getScrollContainer(root) {
   if (!root) return null;
-  const candidates = Array.from(root.querySelectorAll("*")).filter(el => {
-    const style = getComputedStyle(el);
-    return el.scrollHeight > el.clientHeight + 70 && ["auto", "scroll"].includes(style.overflowY);
+
+  const exactPreviewScroll = Array.from(root.querySelectorAll("div")).find(el => {
+    const cls = String(el.className || "");
+    return cls.includes("relative") &&
+      cls.includes("h-screen") &&
+      cls.includes("overflow-y-auto") &&
+      el.scrollHeight > el.clientHeight + 100;
   });
-  candidates.sort((a, b) => (b.clientWidth * b.clientHeight) - (a.clientWidth * a.clientHeight));
-  return candidates[0] || root;
+
+  if (exactPreviewScroll) return exactPreviewScroll;
+
+  const dialog = root.matches?.("mat-dialog-container,.mat-mdc-dialog-container")
+    ? root
+    : root.closest?.("mat-dialog-container,.mat-mdc-dialog-container");
+
+  if (dialog) {
+    const candidates = Array.from(dialog.querySelectorAll("*")).filter(el => {
+      const style = getComputedStyle(el);
+      return el.scrollHeight > el.clientHeight + 100 &&
+        ["auto", "scroll"].includes(style.overflowY);
+    });
+
+    candidates.sort((a, b) => (b.scrollHeight - b.clientHeight) - (a.scrollHeight - a.clientHeight));
+    return candidates[0] || dialog;
+  }
+
+  return null;
 }
 
 async function autoScrollRoot(root) {
   const el = getScrollContainer(root);
   if (!el) return;
+
+  const insideDialog =
+    Boolean(el.closest?.("mat-dialog-container,.mat-mdc-dialog-container")) ||
+    el.matches?.("mat-dialog-container,.mat-mdc-dialog-container");
+
+  if (!insideDialog) return;
+
   el.scrollTop = 0;
+  el.dispatchEvent(new Event("scroll", { bubbles: true }));
   await sleep(300);
+
   let last = -1;
   let guard = 0;
-  while (el.scrollTop !== last && guard < 70) {
+
+  while (Math.abs(el.scrollTop - last) > 2 && guard < 100) {
     last = el.scrollTop;
-    el.scrollTop += 650;
-    await sleep(250);
+    el.scrollTop = Math.min(el.scrollTop + 700, el.scrollHeight);
+    el.dispatchEvent(new Event("scroll", { bubbles: true }));
+    await sleep(220);
     guard++;
+
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 5) break;
   }
+
   el.scrollTop = 0;
-  await sleep(250);
+  el.dispatchEvent(new Event("scroll", { bubbles: true }));
+  await sleep(300);
 }
 
 function getOptionLetter(text = "") {
@@ -293,9 +329,8 @@ function extractQuestions(root, options) {
 }
 
 
-function robustClick(el) {
+function safeClick(el) {
   if (!el) return false;
-  try { el.scrollIntoView({ block: "center", inline: "center" }); } catch {}
 
   const rect = el.getBoundingClientRect();
   const opts = {
@@ -335,6 +370,13 @@ function questionUniqueKey(q) {
   return `${q.qno}|${textKey}`.slice(0, 500);
 }
 
+function getPreviewPageSignature(root) {
+  const current = extractQuestions(root, {});
+  return current.questions
+    .map(q => `${q.qno}:${compactText(q.question).slice(0, 120)}`)
+    .join("|");
+}
+
 function findPreviewNextButton() {
   const candidates = Array.from(document.querySelectorAll("button,[role='button'],a"))
     .filter(isVisible)
@@ -353,7 +395,6 @@ function findPreviewNextButton() {
         Boolean(btn.closest(".mat-button-disabled,.mat-mdc-button-disabled"));
 
       const looksNext =
-        label === "next page" ||
         label.includes("next page") ||
         title.includes("next") ||
         text === "next" ||
@@ -393,6 +434,7 @@ async function scanPreview(options = {}) {
 
   for (let page = 1; page <= maxPages; page++) {
     const pageRoot = getPreviewRoot() || firstRoot;
+
     await autoScrollRoot(pageRoot);
 
     const current = extractQuestions(pageRoot, options);
@@ -410,25 +452,19 @@ async function scanPreview(options = {}) {
 
     rows.push(...current.reportRows);
 
+    if (!signature || seenPages.has(signature)) break;
+    seenPages.add(signature);
+
     const nextButton = findPreviewNextButton();
     if (!nextButton) break;
 
-    if (signature && seenPages.has(signature)) break;
-    if (signature) seenPages.add(signature);
-
-    robustClick(nextButton);
+    safeClick(nextButton);
 
     let changed = false;
-    for (let wait = 0; wait < 12; wait++) {
+    for (let wait = 0; wait < 14; wait++) {
       await sleep(500);
       const afterRoot = getPreviewRoot() || pageRoot;
-      await autoScrollRoot(afterRoot);
-
-      const afterCurrent = extractQuestions(afterRoot, options);
-      const afterSignature = afterCurrent.questions
-        .map(q => `${q.qno}:${compactText(q.question).slice(0, 120)}`)
-        .join("|");
-
+      const afterSignature = getPreviewPageSignature(afterRoot);
       if (afterSignature && afterSignature !== signature) {
         changed = true;
         break;
@@ -459,7 +495,12 @@ function getTestRowActionButtons() {
       const text = compactText(btn.innerText || btn.textContent || "").toLowerCase();
       const icon = compactText(btn.querySelector("mat-icon")?.innerText || "").toLowerCase();
       const rect = btn.getBoundingClientRect();
-      const looksMenu = text === "more_vert" || icon === "more_vert" || icon.includes("more_vert") || text === "⋮";
+      const looksMenu =
+        text === "more_vert" ||
+        icon === "more_vert" ||
+        icon.includes("more_vert") ||
+        text === "⋮";
+
       return looksMenu && rect.top > 250 && rect.left > window.innerWidth * 0.55;
     })
     .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
@@ -470,7 +511,7 @@ async function clickFirstRowMenuItem(itemRegex) {
   const buttons = getTestRowActionButtons();
 
   for (const btn of buttons) {
-    robustClick(btn);
+    safeClick(btn);
     await sleep(1000);
 
     const panes = Array.from(document.querySelectorAll(".cdk-overlay-pane,.mat-menu-panel,.mat-mdc-menu-panel,[role='menu']"))
@@ -500,7 +541,7 @@ async function clickFirstRowMenuItem(itemRegex) {
     const item = items.find(x => itemRegex.test(x.text));
 
     if (item) {
-      robustClick(item.clickable);
+      safeClick(item.clickable);
       await sleep(3000);
       return true;
     }
@@ -514,13 +555,11 @@ async function clickFirstRowMenuItem(itemRegex) {
 
 async function openPreviewTest() {
   if (getPreviewRoot()) return true;
-
   const clicked = await clickFirstRowMenuItem(/Preview Test & Questions/i);
   if (clicked) {
     await sleep(1500);
     return Boolean(getPreviewRoot());
   }
-
   return Boolean(getPreviewRoot());
 }
 
@@ -546,7 +585,7 @@ async function closePreview() {
     .sort((a, b) => b.score - a.score);
 
   if (closeCandidates[0]) {
-    robustClick(closeCandidates[0].btn);
+    safeClick(closeCandidates[0].btn);
     await sleep(1200);
     if (!getPreviewRoot()) return true;
   }
@@ -578,9 +617,7 @@ async function goToEditStep2() {
     const root = getEditRoot() || document;
     const text = compactText(root.innerText || root.textContent || "").toLowerCase();
 
-    if (text.includes("allow submit") || text.includes("duration in minutes") || text.includes("total questions")) {
-      return true;
-    }
+    if (text.includes("allow submit") || text.includes("duration in minutes") || text.includes("total questions")) return true;
 
     const saveNext = Array.from(document.querySelectorAll("button,[role='button'],a"))
       .filter(isVisible)
@@ -591,8 +628,7 @@ async function goToEditStep2() {
       .find(x => /save\s*&\s*next/i.test(x.text));
 
     if (!saveNext) return false;
-
-    robustClick(saveNext.el);
+    safeClick(saveNext.el);
     await sleep(2500);
   }
 
@@ -609,18 +645,16 @@ async function closeEditTest() {
     .map(btn => {
       const text = compactText(`${btn.innerText || ""} ${btn.getAttribute("aria-label") || ""} ${btn.getAttribute("title") || ""}`).toLowerCase();
       const icon = compactText(btn.querySelector("mat-icon")?.innerText || "").toLowerCase();
-
       let score = 0;
       if (text === "close" || text.includes("close")) score += 200;
       if (icon === "close" || icon === "cancel") score += 200;
-
       return { btn, score };
     })
     .filter(x => x.score > 0)
     .sort((a, b) => b.score - a.score);
 
   if (closeCandidates[0]) {
-    robustClick(closeCandidates[0].btn);
+    safeClick(closeCandidates[0].btn);
     await sleep(1200);
     return true;
   }
@@ -645,28 +679,22 @@ function getNumberByLabel(root, labelRegex, excludeRegex) {
     const label = compactText(field.innerText || field.textContent || "");
     if (!labelRegex.test(label)) return;
     if (excludeRegex && excludeRegex.test(label)) return;
-
     const input = field.querySelector("input[type='number'], input[type='text'], input:not([type])");
     const value = numberFromInput(input);
-
     if (value !== null) candidates.push({ value, label, score: 100 });
   });
 
   Array.from(root.querySelectorAll("input[type='number']")).forEach(input => {
     const value = numberFromInput(input);
     if (value === null) return;
-
     let el = input.parentElement;
     let text = "";
-
     for (let i = 0; i < 8 && el && el !== root.parentElement; i++, el = el.parentElement) {
       text = compactText(el.innerText || el.textContent || "");
       if (labelRegex.test(text)) break;
     }
-
     if (!labelRegex.test(text)) return;
     if (excludeRegex && excludeRegex.test(text)) return;
-
     candidates.push({ value, label: text, score: 80 });
   });
 
@@ -676,41 +704,26 @@ function getNumberByLabel(root, labelRegex, excludeRegex) {
 
 function checkboxChecked(inputOrHolder) {
   if (!inputOrHolder) return null;
-
-  const input = inputOrHolder.matches?.("input[type='checkbox']")
-    ? inputOrHolder
-    : inputOrHolder.querySelector?.("input[type='checkbox']");
-
-  const holder =
-    input?.closest("mat-checkbox,.mat-checkbox,.mat-mdc-checkbox,label") ||
-    inputOrHolder.closest?.("mat-checkbox,.mat-checkbox,.mat-mdc-checkbox,label") ||
-    inputOrHolder;
-
-  return Boolean(
-    input?.checked === true ||
+  const input = inputOrHolder.matches?.("input[type='checkbox']") ? inputOrHolder : inputOrHolder.querySelector?.("input[type='checkbox']");
+  const holder = input?.closest("mat-checkbox,.mat-checkbox,.mat-mdc-checkbox,label") || inputOrHolder.closest?.("mat-checkbox,.mat-checkbox,.mat-mdc-checkbox,label") || inputOrHolder;
+  return Boolean(input?.checked === true ||
     input?.getAttribute("aria-checked") === "true" ||
     holder?.getAttribute?.("aria-checked") === "true" ||
     holder?.classList?.contains("mat-checkbox-checked") ||
     holder?.classList?.contains("mat-mdc-checkbox-checked") ||
     holder?.classList?.contains("mdc-checkbox--selected") ||
-    holder?.querySelector?.(".mat-checkbox-checked,.mat-mdc-checkbox-checked,.mdc-checkbox--selected")
-  );
+    holder?.querySelector?.(".mat-checkbox-checked,.mat-mdc-checkbox-checked,.mdc-checkbox--selected"));
 }
 
 function getCheckboxState(root, labelText) {
   if (!root) return null;
   const target = labelText.toLowerCase();
-
   const holders = Array.from(root.querySelectorAll("mat-checkbox, .mat-checkbox, .mat-mdc-checkbox, label, input[type='checkbox']"));
 
   for (const h of holders) {
-    const holder = h.matches?.("input[type='checkbox']")
-      ? h.closest("label,mat-checkbox,.mat-checkbox,.mat-mdc-checkbox") || h.parentElement || h
-      : h;
-
+    const holder = h.matches?.("input[type='checkbox']") ? h.closest("label,mat-checkbox,.mat-checkbox,.mat-mdc-checkbox") || h.parentElement || h : h;
     const text = compactText(holder.innerText || holder.textContent || "").toLowerCase();
     const aria = compactText(`${h.getAttribute("aria-label") || ""} ${h.getAttribute("name") || ""}`).toLowerCase();
-
     if (text.includes(target) || aria.includes(target)) return checkboxChecked(h);
   }
 
@@ -719,14 +732,12 @@ function getCheckboxState(root, labelText) {
 
 function getValueAfterLabel(text, regex) {
   const lines = cleanText(text).split("\n").map(x => x.trim()).filter(Boolean);
-
   for (let i = 0; i < lines.length; i++) {
     if (regex.test(lines[i])) {
       const same = lines[i].replace(regex, "").replace(/[*:]/g, "").trim();
       return same || lines[i + 1] || "";
     }
   }
-
   return "";
 }
 
@@ -736,7 +747,6 @@ function findDurations(text) {
     /(?:duration|time\s*given|total\s*duration)[^\d]{0,50}(\d+)\s*(?:minutes?|mins?)/gi,
     /(\d+)\s*(?:minutes?|mins?)\s*(?:duration|time)/gi
   ];
-
   patterns.forEach(re => {
     let m;
     while ((m = re.exec(text)) !== null) {
@@ -744,7 +754,6 @@ function findDurations(text) {
       if (n > 0 && n < 1000 && !found.includes(n)) found.push(n);
     }
   });
-
   return found;
 }
 
@@ -767,83 +776,36 @@ function readEditConfig(scannedCount) {
   const videoRequired = disableVideo === false;
   const syllabus = syllabusStatus(text);
 
-  if (allowSubmit === false) {
-    rows.push(reportRow({ priority: "Critical", type: "Test", qno: "-", ruleId: "T001", check: "Allow Submit", status: "ERROR", details: "Allow Submit is not checked" }));
-  } else if (allowSubmit === null) {
-    rows.push(reportRow({ priority: "Warning", type: "Test", qno: "-", ruleId: "T001", check: "Allow Submit", status: "WARNING", details: "Allow Submit checkbox not found" }));
-  }
+  if (allowSubmit === false) rows.push(reportRow({ priority: "Critical", type: "Test", qno: "-", ruleId: "T001", check: "Allow Submit", status: "ERROR", details: "Allow Submit is not checked" }));
+  else if (allowSubmit === null) rows.push(reportRow({ priority: "Warning", type: "Test", qno: "-", ruleId: "T001", check: "Allow Submit", status: "WARNING", details: "Allow Submit checkbox not found" }));
 
-  if (totalQuestions === null) {
-    rows.push(reportRow({ priority: "Warning", type: "Test", qno: "-", ruleId: "T002", check: "Total Questions", status: "WARNING", details: "Total Questions field not found" }));
-  } else if (scannedCount > 0 && totalQuestions !== scannedCount) {
-    rows.push(reportRow({ priority: "Critical", type: "Test", qno: "-", ruleId: "T002", check: "Total Questions", status: "ERROR", details: `Total Questions field = ${totalQuestions}, Scanned = ${scannedCount}` }));
-  }
+  if (totalQuestions === null) rows.push(reportRow({ priority: "Warning", type: "Test", qno: "-", ruleId: "T002", check: "Total Questions", status: "WARNING", details: "Total Questions field not found" }));
+  else if (scannedCount > 0 && totalQuestions !== scannedCount) rows.push(reportRow({ priority: "Critical", type: "Test", qno: "-", ruleId: "T002", check: "Total Questions", status: "ERROR", details: `Total Questions field = ${totalQuestions}, Scanned = ${scannedCount}` }));
 
   if (duration === null) {
     rows.push(reportRow({ priority: "Critical", type: "Test", qno: "-", ruleId: "T003", check: "Duration", status: "ERROR", details: "Duration In Minutes field missing" }));
   } else {
     const instructionDurations = findDurations(text);
-    if (instructionDurations.length === 0) {
-      rows.push(reportRow({ priority: "Warning", type: "Test", qno: "-", ruleId: "T004", check: "Duration in Instructions", status: "WARNING", details: "Duration not mentioned in instructions" }));
-    } else if (!instructionDurations.includes(duration)) {
-      rows.push(reportRow({ priority: "Critical", type: "Test", qno: "-", ruleId: "T004", check: "Duration in Instructions", status: "ERROR", details: `Duration field = ${duration} min, Instructions = ${instructionDurations.join("/")} min` }));
-    }
+    if (instructionDurations.length === 0) rows.push(reportRow({ priority: "Warning", type: "Test", qno: "-", ruleId: "T004", check: "Duration in Instructions", status: "WARNING", details: "Duration not mentioned in instructions" }));
+    else if (!instructionDurations.includes(duration)) rows.push(reportRow({ priority: "Critical", type: "Test", qno: "-", ruleId: "T004", check: "Duration in Instructions", status: "ERROR", details: `Duration field = ${duration} min, Instructions = ${instructionDurations.join("/")} min` }));
   }
 
-  if (!syllabus.found || syllabus.missing) {
-    rows.push(reportRow({ priority: "Critical", type: "Test", qno: "-", ruleId: "T005", check: "Syllabus", status: "ERROR", details: "Syllabus missing" }));
-  }
+  if (!syllabus.found || syllabus.missing) rows.push(reportRow({ priority: "Critical", type: "Test", qno: "-", ruleId: "T005", check: "Syllabus", status: "ERROR", details: "Syllabus missing" }));
 
-  [
-    "Important",
-    "Disable Solution",
-    "Disable Text Solution",
-    "Disable Video Solution",
-    "Enable Question Paper",
-    "Shuffle Question",
-    "Section Timing Enable",
-    "Enable StateRank",
-    "Is Pausable",
-    "Enable Scientific Calculator",
-    "Enable Basic Calculator",
-    "Enable CAT Percentile",
-    "Is Proctored",
-    "Enable Percentile",
-    "Wallet Purchase",
-    "Show all Comprehension Questions together"
-  ].forEach(label => {
-    if (getCheckboxState(root, label) === true) {
-      rows.push(reportRow({ priority: "Warning", type: "Test", qno: "-", ruleId: "W003", check: "Checkbox", status: "WARNING", details: `${label} is checked` }));
-    }
+  ["Important","Disable Solution","Disable Text Solution","Disable Video Solution","Enable Question Paper","Shuffle Question","Section Timing Enable","Enable StateRank","Is Pausable","Enable Scientific Calculator","Enable Basic Calculator","Enable CAT Percentile","Is Proctored","Enable Percentile","Wallet Purchase","Show all Comprehension Questions together"].forEach(label => {
+    if (getCheckboxState(root, label) === true) rows.push(reportRow({ priority: "Warning", type: "Test", qno: "-", ruleId: "W003", check: "Checkbox", status: "WARNING", details: `${label} is checked` }));
   });
 
-  return {
-    rows,
-    config: { allowSubmit, totalQuestions, duration, syllabus: syllabus.value || null, videoRequired }
-  };
+  return { rows, config: { allowSubmit, totalQuestions, duration, syllabus: syllabus.value || null, videoRequired } };
 }
 
 function buildCSV(rows) {
   sortReportRows(rows);
-
   let csv = "Priority,Type,Question No,Rule ID,Check,Status,Details,Admin Answer,Solution Answer,Options Count,Video Solution\n";
-
   rows.forEach(r => {
-    csv += [
-      r.priority,
-      r.type,
-      r.qno,
-      r.ruleId,
-      r.check,
-      r.status,
-      r.details,
-      r.adminAnswer,
-      r.solutionAnswer,
-      r.optionsCount,
-      r.videoSolution
-    ].map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",") + "\n";
+    csv += [r.priority,r.type,r.qno,r.ruleId,r.check,r.status,r.details,r.adminAnswer,r.solutionAnswer,r.optionsCount,r.videoSolution]
+      .map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",") + "\n";
   });
-
   return csv;
 }
 
@@ -874,43 +836,20 @@ async function runDev3Flow(options = {}) {
 
   if (editOpened) {
     const step2Opened = await goToEditStep2();
-
-    if (!step2Opened) {
-      rows.push(reportRow({ priority: "Warning", type: "Test", qno: "-", ruleId: "T007", check: "Edit Test Step 2", status: "WARNING", details: "Save & Next / Step 2 could not be opened automatically" }));
-    }
+    if (!step2Opened) rows.push(reportRow({ priority: "Warning", type: "Test", qno: "-", ruleId: "T007", check: "Edit Test Step 2", status: "WARNING", details: "Save & Next / Step 2 could not be opened automatically" }));
 
     const edit = readEditConfig(preview.questions.length);
     config = edit.config;
     rows.push(...edit.rows);
     await closeEditTest();
   } else {
-    rows.push(reportRow({
-      priority: "Warning",
-      type: "Test",
-      qno: "-",
-      ruleId: "T006",
-      check: "Edit Test",
-      status: "WARNING",
-      details: `Edit Test could not be opened automatically. Menu seen: ${(window.__QC_LAST_MENU_TEXTS__ || []).join(" | ") || "No menu text detected"}`
-    }));
+    rows.push(reportRow({ priority: "Warning", type: "Test", qno: "-", ruleId: "T006", check: "Edit Test", status: "WARNING", details: `Edit Test could not be opened automatically. Menu seen: ${(window.__QC_LAST_MENU_TEXTS__ || []).join(" | ") || "No menu text detected"}` }));
   }
 
   if (config.videoRequired === true) {
     preview.questions.forEach(q => {
       if (q.videoSolution === "Missing") {
-        rows.push(reportRow({
-          priority: "Warning",
-          type: "Question",
-          qno: q.qno,
-          ruleId: "W002",
-          check: "Video Solution",
-          status: "WARNING",
-          details: "Video solution missing while video checkbox is ON",
-          adminAnswer: q.adminAnswer,
-          solutionAnswer: q.solutionAnswer,
-          optionsCount: q.optionsCount,
-          videoSolution: q.videoSolution
-        }));
+        rows.push(reportRow({ priority: "Warning", type: "Question", qno: q.qno, ruleId: "W002", check: "Video Solution", status: "WARNING", details: "Video solution missing while video checkbox is ON", adminAnswer: q.adminAnswer, solutionAnswer: q.solutionAnswer, optionsCount: q.optionsCount, videoSolution: q.videoSolution }));
       }
     });
   }
@@ -930,10 +869,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       const result = await runDev3Flow(options);
       const rows = result.rows;
 
-      const questionErrorSet = new Set(
-        rows.filter(r => r.type === "Question" && r.status === "ERROR").map(r => String(r.qno))
-      );
-
+      const questionErrorSet = new Set(rows.filter(r => r.type === "Question" && r.status === "ERROR").map(r => String(r.qno)));
       const errorCount = rows.filter(r => r.status === "ERROR").length;
       const warningCount = rows.filter(r => r.status === "WARNING").length;
 
@@ -953,23 +889,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         config: result.config || {}
       });
     } catch (err) {
-      console.error("QC Assistant DEV3 clean failed", err);
+      console.error("QC Assistant DEV3 FINAL failed", err);
       const rows = [reportRow({ priority: "Critical", type: "Test", qno: "-", ruleId: "RUNTIME", check: "Runtime Error", status: "ERROR", details: err.message || String(err) })];
-      sendResponse({
-        version: QC_VERSION,
-        questionsFound: 0,
-        questionsWithErrors: 0,
-        errorCount: 1,
-        warningCount: 0,
-        passCount: 0,
-        imagesFound: 0,
-        reportRows: rows,
-        csv: buildCSV(rows),
-        questions: [],
-        issues: rows,
-        warnings: rows,
-        config: {}
-      });
+      sendResponse({ version: QC_VERSION, questionsFound: 0, questionsWithErrors: 0, errorCount: 1, warningCount: 0, passCount: 0, imagesFound: 0, reportRows: rows, csv: buildCSV(rows), questions: [], issues: rows, warnings: rows, config: {} });
     }
   })();
 
