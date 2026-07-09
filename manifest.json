@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "QC Assistant DEV3 Clean",
-  "version": "3.0.6",
-  "description": "QC Assistant Development Build DEV3 Clean",
+  "name": "QC Assistant DEV3 FINAL",
+  "version": "3.1.0",
+  "description": "QC Assistant DEV3 FINAL stable build",
   "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": [
     "https://admin-v2.penpencil.co/*",
