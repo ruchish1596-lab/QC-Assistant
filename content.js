@@ -1,6 +1,6 @@
-console.log("QC Assistant DEV3.2 Loaded");
+console.log("QC Assistant DEV3.3 Loaded");
 
-const QC_VERSION = "3.0.2-dev3";
+const QC_VERSION = "3.0.3-dev3";
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function cleanText(text = "") {
@@ -483,49 +483,47 @@ function questionUniqueKey(q) {
 }
 
 function findNextButton(root) {
-  if (!root) return null;
-
-  const rootRect = root.getBoundingClientRect();
-
-  return Array.from(root.querySelectorAll("button,[role='button']"))
-    .filter(btn => {
-      if (!isVisible(btn)) return false;
-
-      const rect = btn.getBoundingClientRect();
-      const inside =
-        rect.left >= rootRect.left - 10 &&
-        rect.right <= rootRect.right + 10 &&
-        rect.top >= rootRect.top - 10 &&
-        rect.bottom <= rootRect.bottom + 10;
-
-      if (!inside) return false;
-
+  const candidates = Array.from(document.querySelectorAll("button,[role='button'],a"))
+    .filter(isVisible)
+    .map(btn => {
       const label = (btn.getAttribute("aria-label") || "").toLowerCase();
       const title = (btn.getAttribute("title") || "").toLowerCase();
-      const text = compactText(btn.innerText || "").toLowerCase();
+      const text = compactText(btn.innerText || btn.textContent || "").toLowerCase();
       const icon = compactText(btn.querySelector("mat-icon")?.innerText || "").toLowerCase();
 
       const disabled =
         btn.disabled ||
+        btn.getAttribute("disabled") !== null ||
         btn.getAttribute("aria-disabled") === "true" ||
         btn.classList.contains("mat-button-disabled") ||
         btn.classList.contains("mat-mdc-button-disabled") ||
         Boolean(btn.closest(".mat-button-disabled,.mat-mdc-button-disabled"));
 
-      if (disabled) return false;
-
-      return (
+      const looksNext =
+        label === "next page" ||
         label.includes("next page") ||
-        label === "next" ||
         title.includes("next") ||
         text === "next" ||
-        text.includes("next") ||
-        icon.includes("chevron_right") ||
-        icon.includes("keyboard_arrow_right") ||
-        icon === "navigate_next"
+        icon === "chevron_right" ||
+        icon === "keyboard_arrow_right" ||
+        icon === "navigate_next";
+
+      if (!looksNext || disabled) return null;
+
+      const rect = btn.getBoundingClientRect();
+      const inPreviewDialog = Boolean(
+        btn.closest("mat-dialog-container,.mat-mdc-dialog-container,.cdk-overlay-pane,[role='dialog']")?.querySelector("mat-card-title")
       );
+
+      return {
+        btn,
+        score: (inPreviewDialog ? 10000 : 0) + rect.top + (rect.left > window.innerWidth * 0.45 ? 500 : 0)
+      };
     })
-    .pop();
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score);
+
+  return candidates[0]?.btn || null;
 }
 
 async function scanPreview(options = {}) {
@@ -542,21 +540,23 @@ async function scanPreview(options = {}) {
 
   const allQuestions = [];
   const rows = [];
-  const seen = new Set();
+  const seenQuestionKeys = new Set();
+  const seenPageSignatures = new Set();
   const maxPages = 100;
 
   for (let page = 1; page <= maxPages; page++) {
     const pageRoot = getPreviewRoot() || firstRoot;
-
     await autoScrollRoot(pageRoot);
 
     const current = extractQuestions(pageRoot, options);
+    const signature = current.questions
+      .map(q => `${q.qno}:${compactText(q.question).slice(0, 120)}`)
+      .join("|");
 
     current.questions.forEach(q => {
       const key = questionUniqueKey(q);
-
-      if (!seen.has(key)) {
-        seen.add(key);
+      if (!seenQuestionKeys.has(key)) {
+        seenQuestionKeys.add(key);
         allQuestions.push(q);
       }
     });
@@ -566,14 +566,30 @@ async function scanPreview(options = {}) {
     const nextButton = findNextButton(pageRoot);
     if (!nextButton) break;
 
-    const before = compactText(pageRoot.innerText || "");
-    nextButton.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-    await sleep(1800);
+    if (signature && seenPageSignatures.has(signature)) break;
+    if (signature) seenPageSignatures.add(signature);
 
-    const afterRoot = getPreviewRoot() || pageRoot;
-    const after = compactText(afterRoot.innerText || "");
+    robustClick(nextButton);
 
-    if (after === before) break;
+    let changed = false;
+
+    for (let wait = 0; wait < 12; wait++) {
+      await sleep(500);
+      const afterRoot = getPreviewRoot() || pageRoot;
+      await autoScrollRoot(afterRoot);
+
+      const afterCurrent = extractQuestions(afterRoot, options);
+      const afterSignature = afterCurrent.questions
+        .map(q => `${q.qno}:${compactText(q.question).slice(0, 120)}`)
+        .join("|");
+
+      if (afterSignature && afterSignature !== signature) {
+        changed = true;
+        break;
+      }
+    }
+
+    if (!changed) break;
   }
 
   allQuestions.sort((a, b) => Number(a.qno) - Number(b.qno));
@@ -777,6 +793,132 @@ function syllabusStatus(text) {
   };
 }
 
+
+function robustClick(el) {
+  if (!el) return false;
+  try {
+    el.scrollIntoView({ block: "center", inline: "center" });
+  } catch {}
+
+  const rect = el.getBoundingClientRect();
+  const opts = {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    clientX: rect.left + rect.width / 2,
+    clientY: rect.top + rect.height / 2
+  };
+
+  ["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach(type => {
+    try {
+      el.dispatchEvent(new MouseEvent(type, opts));
+    } catch {
+      try { el.click(); } catch {}
+    }
+  });
+
+  try { el.click(); } catch {}
+  return true;
+}
+
+function getTestRowActionButtons() {
+  return Array.from(document.querySelectorAll("button,[role='button']"))
+    .filter(isVisible)
+    .filter(btn => {
+      const label = (btn.getAttribute("aria-label") || "").toLowerCase();
+      const title = (btn.getAttribute("title") || "").toLowerCase();
+      const text = compactText(btn.innerText || btn.textContent || "").toLowerCase();
+      const icon = compactText(btn.querySelector("mat-icon")?.innerText || "").toLowerCase();
+      const rect = btn.getBoundingClientRect();
+
+      const looksMenu =
+        label.includes("more") ||
+        title.includes("more") ||
+        text === "more_vert" ||
+        icon === "more_vert" ||
+        icon.includes("more_vert") ||
+        text === "⋮";
+
+      return looksMenu && rect.top > 250 && rect.left > window.innerWidth * 0.55;
+    })
+    .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+}
+
+async function clickFirstRowMenuItem(itemRegex) {
+  const menuButtons = getTestRowActionButtons();
+  let lastMenuTexts = [];
+
+  for (const btn of menuButtons) {
+    robustClick(btn);
+    await sleep(1000);
+
+    const overlays = Array.from(document.querySelectorAll(
+      ".mat-menu-panel,.mat-mdc-menu-panel,[role='menu'],.cdk-overlay-pane"
+    )).filter(isVisible);
+
+    const menuRoot = overlays.pop() || document;
+
+    const menuItems = Array.from(menuRoot.querySelectorAll("button,[role='menuitem'],a,span,div"))
+      .filter(isVisible)
+      .map(el => {
+        const clickable = el.closest("button,[role='menuitem'],a") || el;
+        const text = compactText(el.innerText || el.textContent || "");
+        return { el, clickable, text };
+      })
+      .filter(x => x.text && x.text !== "more_vert");
+
+    lastMenuTexts = menuItems.map(x => x.text);
+
+    let item = menuItems.find(x => itemRegex.test(x.text));
+
+    if (!item && /edit/i.test(String(itemRegex))) {
+      item = menuItems.find(x => /edit|update|modify/i.test(x.text));
+    }
+
+    if (!item && /preview/i.test(String(itemRegex))) {
+      item = menuItems.find(x => /preview|view|questions/i.test(x.text));
+    }
+
+    if (item) {
+      robustClick(item.clickable);
+      await sleep(2800);
+      return true;
+    }
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
+    await sleep(500);
+  }
+
+  window.__QC_LAST_MENU_TEXTS__ = lastMenuTexts;
+  return false;
+}
+
+async function openPreviewTest() {
+  if (getPreviewRoot()) return true;
+
+  const directPreview = Array.from(document.querySelectorAll("button,[role='button'],a"))
+    .filter(isVisible)
+    .find(el => /preview\s*test|preview\s*test\s*&\s*questions|test\s*&\s*questions|view\s*questions/i.test(
+      compactText(el.innerText || el.textContent || el.getAttribute("aria-label") || "")
+    ));
+
+  if (directPreview) {
+    robustClick(directPreview);
+    await sleep(3000);
+    return Boolean(getPreviewRoot());
+  }
+
+  const clicked = await clickFirstRowMenuItem(/preview\s*test|preview\s*test\s*&\s*questions|test\s*&\s*questions|view\s*questions|preview|view/i);
+
+  if (clicked) {
+    await sleep(1500);
+    return Boolean(getPreviewRoot());
+  }
+
+  return Boolean(getPreviewRoot());
+}
+
+
 function clickVisibleButtonByText(textPatterns, root = document) {
   const patterns = textPatterns.map(x => x instanceof RegExp ? x : new RegExp(String(x), "i"));
 
@@ -803,34 +945,36 @@ function clickVisibleButtonByText(textPatterns, root = document) {
 }
 
 async function closePreview() {
-  const root = getPreviewRoot();
-  if (!root) return true;
+  const closeCandidates = Array.from(document.querySelectorAll(
+    "button[aria-label='Close'],button[aria-label='close'],button[mat-dialog-close],.mat-dialog-close,.mat-mdc-dialog-close,button"
+  ))
+    .filter(isVisible)
+    .map(btn => {
+      const text = compactText(`${btn.innerText || ""} ${btn.getAttribute("aria-label") || ""} ${btn.getAttribute("title") || ""}`).toLowerCase();
+      const icon = compactText(btn.querySelector("mat-icon")?.innerText || "").toLowerCase();
+      const inPreviewDialog = Boolean(
+        btn.closest("mat-dialog-container,.mat-mdc-dialog-container,.cdk-overlay-pane,[role='dialog']")?.querySelector("mat-card-title")
+      );
 
-  const closeSelectors = [
-    "button[aria-label='Close']",
-    "button[aria-label='close']",
-    "button[mat-dialog-close]",
-    ".mat-dialog-close",
-    ".mat-mdc-dialog-close"
-  ];
+      let score = 0;
+      if (inPreviewDialog) score += 10000;
+      if (text === "close" || text.includes("close")) score += 200;
+      if (text === "x" || text === "×") score += 100;
+      if (icon === "close" || icon === "cancel") score += 200;
 
-  for (const selector of closeSelectors) {
-    const button = Array.from(root.querySelectorAll(selector)).find(isVisible);
+      return { btn, score };
+    })
+    .filter(x => x.score > 0)
+    .sort((a, b) => b.score - a.score);
 
-    if (button) {
-      button.click();
-      await sleep(1000);
-      return !getPreviewRoot();
-    }
-  }
-
-  if (clickVisibleButtonByText([/^close$/i, /^cancel$/i, /^x$/i], root)) {
-    await sleep(1000);
-    return !getPreviewRoot();
+  if (closeCandidates[0]) {
+    robustClick(closeCandidates[0].btn);
+    await sleep(1200);
+    if (!getPreviewRoot()) return true;
   }
 
   document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
-  await sleep(1000);
+  await sleep(1200);
 
   return !getPreviewRoot();
 }
@@ -855,115 +999,28 @@ function getThreeDotButtons() {
     });
 }
 
-function getTestRowActionButtons() {
-  return Array.from(document.querySelectorAll("button,[role='button']"))
-    .filter(isVisible)
-    .filter(btn => {
-      const label = (btn.getAttribute("aria-label") || "").toLowerCase();
-      const title = (btn.getAttribute("title") || "").toLowerCase();
-      const text = compactText(btn.innerText || btn.textContent || "").toLowerCase();
-      const icon = compactText(btn.querySelector("mat-icon")?.innerText || "").toLowerCase();
-      const rect = btn.getBoundingClientRect();
-
-      const looksMenu =
-        label.includes("more") ||
-        title.includes("more") ||
-        text === "more_vert" ||
-        icon === "more_vert" ||
-        icon.includes("more_vert") ||
-        text === "⋮";
-
-      const tableArea =
-        rect.top > 250 &&
-        rect.left > window.innerWidth * 0.55;
-
-      return looksMenu && tableArea;
-    })
-    .sort((a, b) => {
-      const ar = a.getBoundingClientRect();
-      const br = b.getBoundingClientRect();
-      return ar.top - br.top;
-    });
-}
-
-async function clickFirstRowMenuItem(itemRegex) {
-  const menuButtons = getTestRowActionButtons();
-
-  for (const btn of menuButtons) {
-    btn.click();
-    await sleep(900);
-
-    const overlays = Array.from(document.querySelectorAll(
-      ".mat-menu-panel,.mat-mdc-menu-panel,[role='menu'],.cdk-overlay-pane"
-    )).filter(isVisible);
-
-    const menuRoot = overlays.pop() || document;
-
-    const menuItems = Array.from(menuRoot.querySelectorAll("button,[role='menuitem'],a,span,div"))
-      .filter(isVisible);
-
-    const item = menuItems.find(el => itemRegex.test(compactText(el.innerText || el.textContent || "")));
-
-    if (item) {
-      (item.closest("button,[role='menuitem'],a") || item).click();
-      await sleep(2600);
-      return true;
-    }
-
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
-    await sleep(400);
-  }
-
-  return false;
-}
-
-async function openPreviewTest() {
-  if (getPreviewRoot()) return true;
-
-  const directPreview = Array.from(document.querySelectorAll("button,[role='button'],a"))
-    .filter(isVisible)
-    .find(el => /preview\s*test|preview\s*test\s*&\s*questions|test\s*&\s*questions/i.test(
-      compactText(el.innerText || el.textContent || el.getAttribute("aria-label") || "")
-    ));
-
-  if (directPreview) {
-    directPreview.click();
-    await sleep(2800);
-    return Boolean(getPreviewRoot());
-  }
-
-  const clicked = await clickFirstRowMenuItem(/preview\s*test|preview\s*test\s*&\s*questions|test\s*&\s*questions/i);
-
-  if (clicked) {
-    await sleep(1200);
-    return Boolean(getPreviewRoot());
-  }
-
-  return Boolean(getPreviewRoot());
-}
-
 async function openEditTest() {
   if (getEditRoot()) return true;
 
   if (getPreviewRoot()) {
     await closePreview();
-    await sleep(1000);
+    await sleep(1200);
   }
 
   const directEdit = Array.from(document.querySelectorAll("button,[role='button'],a"))
     .filter(isVisible)
-    .find(el => /edit\s*test/i.test(compactText(el.innerText || el.textContent || el.getAttribute("aria-label") || "")));
+    .find(el => /edit\s*test|edit|update/i.test(compactText(el.innerText || el.textContent || el.getAttribute("aria-label") || "")));
 
   if (directEdit) {
-    directEdit.click();
-    await sleep(2800);
+    robustClick(directEdit);
+    await sleep(3000);
     return Boolean(getEditRoot());
   }
 
-  const clicked = await clickFirstRowMenuItem(/edit\s*test/i);
+  const clicked = await clickFirstRowMenuItem(/edit\s*test|edit|update|modify/i);
 
   if (clicked) {
-    await sleep(1200);
+    await sleep(1500);
     return Boolean(getEditRoot());
   }
 
@@ -1284,7 +1341,7 @@ async function runDev3Flow(options = {}) {
       ruleId: "T006",
       check: "Edit Test",
       status: "WARNING",
-      details: "Edit Test could not be opened automatically"
+      details: `Edit Test could not be opened automatically. Menu seen: ${(window.__QC_LAST_MENU_TEXTS__ || []).join(" | ") || "No menu text detected"}`
     }));
   }
 
