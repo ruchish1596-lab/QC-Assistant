@@ -1,5 +1,5 @@
 const LOG_URL = "https://script.google.com/macros/s/AKfycbzSihN-ZnLwVtIfA_c9Mij1a6b7Hx6d2tUYe11ut6zNaVshEvMiW5bb9gPELROkkY-p/exec";
-const EXTENSION_VERSION = "3.0.6-dev3-clean";
+const EXTENSION_VERSION = "3.1.0-dev3-final";
 
 let latestCSV = "";
 let latestResponse = null;
@@ -203,7 +203,7 @@ runButton.addEventListener("click", async () => {
   const qcEmail = String(emailInput.value || "").trim().toLowerCase();
   chrome.storage.local.set({ qcUser: qcEmail });
   runButton.disabled = true;
-  result.innerHTML = "Running QC DEV3 Clean... Please wait. Do not touch the page.";
+  result.innerHTML = "Running QC FINAL... Please wait. Do not touch the page.";
 
   try {
     const expectedInput = document.getElementById("expectedCount")?.value;
@@ -263,7 +263,7 @@ runButton.addEventListener("click", async () => {
         });
 
         result.innerHTML = `
-          <b>QC Report DEV3 Clean</b><br><br>
+          <b>QC Report DEV3 FINAL</b><br><br>
           Questions Found: ${response.questionsFound}<br>
           Question Errors: ${response.questionsWithErrors}<br>
           Report Errors: ${response.errorCount}<br>
@@ -292,7 +292,7 @@ runButton.addEventListener("click", async () => {
           const url = URL.createObjectURL(blob);
           const a = document.createElement("a");
           a.href = url;
-          a.download = `QC_Assistant_DEV3_Clean_Report_${Date.now()}.csv`;
+          a.download = `QC_Assistant_DEV3_FINAL_Report_${Date.now()}.csv`;
           a.click();
           URL.revokeObjectURL(url);
         });
