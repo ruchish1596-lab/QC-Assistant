@@ -1,5 +1,5 @@
 const LOG_URL = "https://script.google.com/macros/s/AKfycbzSihN-ZnLwVtIfA_c9Mij1a6b7Hx6d2tUYe11ut6zNaVshEvMiW5bb9gPELROkkY-p/exec";
-const EXTENSION_VERSION = "3.0.5-dev3";
+const EXTENSION_VERSION = "3.0.6-dev3-clean";
 
 let latestCSV = "";
 let latestResponse = null;
@@ -47,29 +47,17 @@ function csvEscape(value) {
 function buildCSV(response) {
   const rows = response.reportRows || [];
   let csv = "Priority,Type,Question No,Rule ID,Check,Status,Details,Admin Answer,Solution Answer,Options Count,Video Solution\n";
-
   rows.forEach(r => {
     csv += [
-      r.priority,
-      r.type,
-      r.qno,
-      r.ruleId,
-      r.check,
-      r.status,
-      r.details,
-      r.adminAnswer,
-      r.solutionAnswer,
-      r.optionsCount,
-      r.videoSolution
+      r.priority, r.type, r.qno, r.ruleId, r.check, r.status,
+      r.details, r.adminAnswer, r.solutionAnswer, r.optionsCount, r.videoSolution
     ].map(csvEscape).join(",") + "\n";
   });
-
   return csv;
 }
 
 function addReportRow(response, row) {
   if (!response.reportRows) response.reportRows = [];
-
   response.reportRows.push({
     priority: row.priority || "Critical",
     type: row.type || "Question",
@@ -88,37 +76,24 @@ function addReportRow(response, row) {
 function sortRows(response) {
   const p = { Critical: 1, Error: 2, Warning: 3, Info: 4, Pass: 5 };
   const t = { Test: 1, Question: 2 };
-
   response.reportRows = (response.reportRows || []).sort((a, b) => {
     const pd = (p[a.priority] || 9) - (p[b.priority] || 9);
     if (pd) return pd;
-
     const td = (t[a.type] || 9) - (t[b.type] || 9);
     if (td) return td;
-
-    const qa = Number(a.qno);
-    const qb = Number(b.qno);
-
+    const qa = Number(a.qno), qb = Number(b.qno);
     if (!Number.isNaN(qa) && !Number.isNaN(qb)) return qa - qb;
-    if (!Number.isNaN(qa)) return -1;
-    if (!Number.isNaN(qb)) return 1;
-
     return String(a.ruleId).localeCompare(String(b.ruleId));
   });
 }
 
 function finalizeCounts(response) {
   sortRows(response);
-
   response.errorCount = (response.reportRows || []).filter(r => r.status === "ERROR").length;
   response.warningCount = (response.reportRows || []).filter(r => r.status === "WARNING").length;
-
   response.questionsWithErrors = new Set(
-    (response.reportRows || [])
-      .filter(r => r.type === "Question" && r.status === "ERROR")
-      .map(r => String(r.qno))
+    (response.reportRows || []).filter(r => r.type === "Question" && r.status === "ERROR").map(r => String(r.qno))
   ).size;
-
   response.passCount = Math.max(0, (response.questionsFound || 0) - response.questionsWithErrors);
   response.csv = response.csv || buildCSV(response);
 }
@@ -133,7 +108,6 @@ function getErrorDetails(response) {
 function readExcelAnswerKey(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-
     reader.onload = e => {
       try {
         const data = new Uint8Array(e.target.result);
@@ -141,20 +115,14 @@ function readExcelAnswerKey(file) {
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
         const map = {};
-
         rows.slice(1).forEach(row => {
           const qno = Number(row[0]);
           const ans = String(row[1] || "").trim().toUpperCase();
-
           if (qno && ["A", "B", "C", "D"].includes(ans)) map[qno] = ans;
         });
-
         resolve(map);
-      } catch (err) {
-        reject(err);
-      }
+      } catch (err) { reject(err); }
     };
-
     reader.onerror = reject;
     reader.readAsArrayBuffer(file);
   });
@@ -163,31 +131,21 @@ function readExcelAnswerKey(file) {
 function readPdfText(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-
     reader.onload = async e => {
       try {
         const typedArray = new Uint8Array(e.target.result);
         const pdf = await pdfjsLib.getDocument({ data: typedArray, disableWorker: true }).promise;
         let fullText = "";
-
         for (let pageNo = 1; pageNo <= pdf.numPages; pageNo++) {
           const page = await pdf.getPage(pageNo);
           const textContent = await page.getTextContent();
           let pageText = "";
-
-          textContent.items.forEach(item => {
-            pageText += item.str + (item.hasEOL ? "\n" : " ");
-          });
-
+          textContent.items.forEach(item => { pageText += item.str + (item.hasEOL ? "\n" : " "); });
           fullText += "\n" + pageText;
         }
-
         resolve(fullText);
-      } catch (err) {
-        reject(err);
-      }
+      } catch (err) { reject(err); }
     };
-
     reader.onerror = reject;
     reader.readAsArrayBuffer(file);
   });
@@ -199,37 +157,25 @@ async function readPdfAnswerKey(file) {
   const answerKeyText = fullText.split(/Hints\s*&\s*Solutions/i)[0];
   const regex = /Q\s*(\d+)\s*\(?\s*([A-D])\s*\)?/gi;
   let m;
-
   while ((m = regex.exec(answerKeyText)) !== null) {
     const qno = Number(m[1]);
     const ans = m[2].toUpperCase();
-
     if (qno && ["A", "B", "C", "D"].includes(ans)) map[qno] = ans;
   }
-
   return map;
 }
 
 async function applyExcelCompare(response, file) {
   const map = await readExcelAnswerKey(file);
-
   response.questions.forEach(q => {
     const expected = map[q.qno];
     const admin = String(q.adminAnswer || "").trim().toUpperCase();
-
     if (expected && admin && admin !== "-" && expected !== admin) {
       addReportRow(response, {
-        priority: "Critical",
-        type: "Question",
-        qno: q.qno,
-        ruleId: "X001",
-        check: "Excel Answer Compare",
-        status: "ERROR",
+        priority: "Critical", type: "Question", qno: q.qno, ruleId: "X001",
+        check: "Excel Answer Compare", status: "ERROR",
         details: `Excel answer mismatch: Admin=${admin}, Excel=${expected}`,
-        adminAnswer: admin,
-        solutionAnswer: expected,
-        optionsCount: q.optionsCount,
-        videoSolution: q.videoSolution
+        adminAnswer: admin, solutionAnswer: expected, optionsCount: q.optionsCount, videoSolution: q.videoSolution
       });
     }
   });
@@ -237,24 +183,15 @@ async function applyExcelCompare(response, file) {
 
 async function applyPdfCompare(response, file) {
   const map = await readPdfAnswerKey(file);
-
   response.questions.forEach(q => {
     const expected = map[q.qno];
     const admin = String(q.adminAnswer || "").trim().toUpperCase();
-
     if (expected && admin && admin !== "-" && expected !== admin) {
       addReportRow(response, {
-        priority: "Critical",
-        type: "Question",
-        qno: q.qno,
-        ruleId: "P001",
-        check: "PDF Answer Compare",
-        status: "ERROR",
+        priority: "Critical", type: "Question", qno: q.qno, ruleId: "P001",
+        check: "PDF Answer Compare", status: "ERROR",
         details: `PDF answer mismatch: Admin=${admin}, PDF=${expected}`,
-        adminAnswer: admin,
-        solutionAnswer: expected,
-        optionsCount: q.optionsCount,
-        videoSolution: q.videoSolution
+        adminAnswer: admin, solutionAnswer: expected, optionsCount: q.optionsCount, videoSolution: q.videoSolution
       });
     }
   });
@@ -265,9 +202,8 @@ runButton.addEventListener("click", async () => {
 
   const qcEmail = String(emailInput.value || "").trim().toLowerCase();
   chrome.storage.local.set({ qcUser: qcEmail });
-
   runButton.disabled = true;
-  result.innerHTML = "Running QC DEV3.5... Please wait.";
+  result.innerHTML = "Running QC DEV3 Clean... Please wait. Do not touch the page.";
 
   try {
     const expectedInput = document.getElementById("expectedCount")?.value;
@@ -275,19 +211,14 @@ runButton.addEventListener("click", async () => {
     const hasVideoSolutions = document.getElementById("hasVideoSolutions")?.checked === true;
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-    if (!tab?.id) {
-      result.innerHTML = "Active admin tab not found.";
-      runButton.disabled = false;
-      return;
-    }
-
     chrome.tabs.sendMessage(
       tab.id,
       {
-        action: "RUN_QC_DEV3.5",
+        action: "RUN_QC_DEV3",
         options: {
           qcUserEmail: qcEmail,
           manualExpectedQuestions,
+          hasVideoSolutions,
           videoRequired: hasVideoSolutions
         }
       },
@@ -295,48 +226,23 @@ runButton.addEventListener("click", async () => {
         runButton.disabled = false;
 
         if (chrome.runtime.lastError || !response) {
-          result.innerHTML = "Admin page refresh karo, Preview Test & Questions open karo, phir Run QC DEV3.5 dabao.";
+          result.innerHTML = "Content script response nahi mila. Admin page refresh karo, extension reload karo, phir run karo.";
           return;
         }
 
         const excelFile = document.getElementById("excelFile")?.files[0];
-
         if (excelFile) {
-          try {
-            await applyExcelCompare(response, excelFile);
-          } catch {
-            addReportRow(response, {
-              priority: "Critical",
-              type: "Test",
-              qno: "-",
-              ruleId: "X000",
-              check: "Excel File",
-              status: "ERROR",
-              details: "Excel file could not be read"
-            });
-          }
+          try { await applyExcelCompare(response, excelFile); }
+          catch { addReportRow(response, { priority: "Critical", type: "Test", qno: "-", ruleId: "X000", check: "Excel File", status: "ERROR", details: "Excel file could not be read" }); }
         }
 
         const pdfFile = document.getElementById("pdfFile")?.files[0];
-
         if (pdfFile) {
-          try {
-            await applyPdfCompare(response, pdfFile);
-          } catch {
-            addReportRow(response, {
-              priority: "Critical",
-              type: "Test",
-              qno: "-",
-              ruleId: "P000",
-              check: "PDF File",
-              status: "ERROR",
-              details: "PDF file could not be read"
-            });
-          }
+          try { await applyPdfCompare(response, pdfFile); }
+          catch { addReportRow(response, { priority: "Critical", type: "Test", qno: "-", ruleId: "P000", check: "PDF File", status: "ERROR", details: "PDF file could not be read" }); }
         }
 
         finalizeCounts(response);
-
         latestCSV = response.csv || "";
         latestResponse = response;
         latestTabUrl = tab.url;
@@ -344,7 +250,7 @@ runButton.addEventListener("click", async () => {
 
         sendLog({
           user: latestUser,
-          event: "RUN_QC_DEV3.5",
+          event: "RUN_QC_DEV3_CLEAN",
           testUrl: latestTabUrl,
           questionsFound: response.questionsFound,
           passCount: response.passCount,
@@ -357,7 +263,7 @@ runButton.addEventListener("click", async () => {
         });
 
         result.innerHTML = `
-          <b>QC Report DEV3.5</b><br><br>
+          <b>QC Report DEV3 Clean</b><br><br>
           Questions Found: ${response.questionsFound}<br>
           Question Errors: ${response.questionsWithErrors}<br>
           Report Errors: ${response.errorCount}<br>
@@ -385,11 +291,9 @@ runButton.addEventListener("click", async () => {
           const blob = new Blob([latestCSV], { type: "text/csv" });
           const url = URL.createObjectURL(blob);
           const a = document.createElement("a");
-
           a.href = url;
-          a.download = `QC_Assistant_DEV3.5_Report_${Date.now()}.csv`;
+          a.download = `QC_Assistant_DEV3_Clean_Report_${Date.now()}.csv`;
           a.click();
-
           URL.revokeObjectURL(url);
         });
       }
