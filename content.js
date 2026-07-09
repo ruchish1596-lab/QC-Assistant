@@ -1,7 +1,7 @@
-console.log("QC Assistant DEV3.5 Loaded");
+console.log("QC Assistant DEV3 Clean Loaded");
 
-const QC_VERSION = "3.0.5-dev3";
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const QC_VERSION = "3.0.6-dev3-clean";
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function cleanText(text = "") {
   return String(text)
@@ -20,19 +20,7 @@ function isVisible(el) {
   if (!el) return false;
   const rect = el.getBoundingClientRect();
   const style = getComputedStyle(el);
-  return (
-    rect.width > 8 &&
-    rect.height > 8 &&
-    style.display !== "none" &&
-    style.visibility !== "hidden" &&
-    style.opacity !== "0"
-  );
-}
-
-function isPwLiveEmail(email = "") {
-  const value = String(email || "").trim();
-  if (!value) return true;
-  return /^[a-zA-Z0-9._%+-]+@pw\.live$/i.test(value);
+  return rect.width > 10 && rect.height > 10 && style.display !== "none" && style.visibility !== "hidden";
 }
 
 function reportRow({
@@ -48,76 +36,50 @@ function reportRow({
   optionsCount = "-",
   videoSolution = "-"
 }) {
-  return {
-    priority,
-    type,
-    qno,
-    ruleId,
-    check,
-    status,
-    details,
-    adminAnswer,
-    solutionAnswer,
-    optionsCount,
-    videoSolution
-  };
+  return { priority, type, qno, ruleId, check, status, details, adminAnswer, solutionAnswer, optionsCount, videoSolution };
 }
 
 function sortReportRows(rows) {
   const p = { Critical: 1, Error: 2, Warning: 3, Info: 4, Pass: 5 };
   const t = { Test: 1, Question: 2 };
-
   return rows.sort((a, b) => {
     const pd = (p[a.priority] || 9) - (p[b.priority] || 9);
     if (pd) return pd;
-
     const td = (t[a.type] || 9) - (t[b.type] || 9);
     if (td) return td;
-
-    const qa = Number(a.qno);
-    const qb = Number(b.qno);
-
+    const qa = Number(a.qno), qb = Number(b.qno);
     if (!Number.isNaN(qa) && !Number.isNaN(qb)) return qa - qb;
-    if (!Number.isNaN(qa)) return -1;
-    if (!Number.isNaN(qb)) return 1;
-
     return String(a.ruleId).localeCompare(String(b.ruleId));
   });
-}
-
-function rootText(root) {
-  return compactText(root?.innerText || root?.textContent || "");
 }
 
 function getPreviewRoot() {
   const titles = Array.from(document.querySelectorAll("mat-card-title")).filter(isVisible);
   if (!titles.length) return null;
-
   const first = titles[0];
   const dialog = first.closest("mat-dialog-container, .mat-mdc-dialog-container, .cdk-overlay-pane, [role='dialog']");
-
   if (dialog && isVisible(dialog)) return dialog;
 
   let el = first.parentElement;
   let best = null;
-
   while (el && el !== document.body && el !== document.documentElement) {
     if (isVisible(el)) {
       const count = el.querySelectorAll("mat-card-title").length;
       const rect = el.getBoundingClientRect();
       const area = rect.width * rect.height;
       const scrollable = el.scrollHeight > el.clientHeight + 60;
-
       if (count > 0 && area > 50000) {
         const score = count * 1000 + (scrollable ? 300 : 0) - area / 100000;
         if (!best || score > best.score) best = { el, score };
       }
     }
-
     el = el.parentElement;
   }
-
   return best?.el || null;
+}
+
+function rootText(root) {
+  return compactText(root?.innerText || root?.textContent || "");
 }
 
 function getEditRoot() {
@@ -127,78 +89,56 @@ function getEditRoot() {
     ".cdk-overlay-pane",
     "[role='dialog']",
     ".mat-drawer-content",
-    ".mat-sidenav-content",
-    "app-edit-test",
-    "app-test-form"
+    ".mat-sidenav-content"
   ].join(","))).filter(isVisible);
 
   const scored = candidates.map(el => {
     const text = rootText(el).toLowerCase();
     let score = 0;
-
-    if (text.includes("duration in minutes")) score += 90;
-    if (text.includes("total questions")) score += 90;
-    if (text.includes("allow submit")) score += 90;
-    if (text.includes("display order")) score += 25;
-    if (text.includes("available for")) score += 25;
+    if (text.includes("duration in minutes")) score += 80;
+    if (text.includes("total questions")) score += 80;
+    if (text.includes("allow submit")) score += 80;
+    if (text.includes("display order")) score += 30;
+    if (text.includes("available for")) score += 30;
     if (text.includes("actions")) score += 20;
     if (text.includes("total marks")) score += 20;
-    if (text.includes("syllabus")) score += 20;
-
-    const formCombo =
-      text.includes("duration in minutes") &&
-      text.includes("total questions");
-
+    if (text.includes("syllabus")) score += 10;
+    // Strong guard: preview often has question cards/general instructions but not this edit-form combo.
+    const formCombo = text.includes("duration in minutes") && text.includes("total questions") && text.includes("allow submit");
     if (!formCombo) score -= 200;
-
     const rect = el.getBoundingClientRect();
     score -= (rect.width * rect.height) / 2000000;
-
-    return { el, score };
+    return { el, score, text };
   }).sort((a, b) => b.score - a.score);
 
-  return scored[0]?.score > 70 ? scored[0].el : null;
+  return scored[0]?.score > 100 ? scored[0].el : null;
 }
 
 function getScrollContainer(root) {
   if (!root) return null;
-
   const candidates = Array.from(root.querySelectorAll("*")).filter(el => {
     const style = getComputedStyle(el);
-    return (
-      el.scrollHeight > el.clientHeight + 70 &&
-      ["auto", "scroll"].includes(style.overflowY)
-    );
+    return el.scrollHeight > el.clientHeight + 70 && ["auto", "scroll"].includes(style.overflowY);
   });
-
-  candidates.sort((a, b) => {
-    const arA = a.clientWidth * a.clientHeight;
-    const arB = b.clientWidth * b.clientHeight;
-    return arB - arA;
-  });
-
+  candidates.sort((a, b) => (b.clientWidth * b.clientHeight) - (a.clientWidth * a.clientHeight));
   return candidates[0] || root;
 }
 
 async function autoScrollRoot(root) {
   const el = getScrollContainer(root);
   if (!el) return;
-
   el.scrollTop = 0;
   await sleep(300);
-
   let last = -1;
   let guard = 0;
-
-  while (el.scrollTop !== last && guard < 90) {
+  while (el.scrollTop !== last && guard < 70) {
     last = el.scrollTop;
     el.scrollTop += 650;
     await sleep(250);
     guard++;
   }
-
   el.scrollTop = 0;
-  await sleep(300);
+  await sleep(250);
 }
 
 function getOptionLetter(text = "") {
@@ -208,9 +148,7 @@ function getOptionLetter(text = "") {
 
 function getSolutionAnswer(text = "") {
   const raw = compactText(text);
-
   if (/\banswer\s*:\s*[spdf]\s*block\b/i.test(raw)) return "";
-
   const patterns = [
     /\boption\s+([A-D])\s+is\s+the\s+correct\s+answer\b/i,
     /\boption\s+([A-D])\s+is\s+correct\b/i,
@@ -226,67 +164,32 @@ function getSolutionAnswer(text = "") {
     /\bsolution\s+that\s+is\s+right\s+is\s*:?\s*(?:option\s*)?([A-D])\b/i,
     /\bsolution\s+is\s*:?\s*(?:option\s*)?([A-D])\b/i
   ];
-
-  for (const pattern of patterns) {
-    const match = raw.match(pattern);
-    if (match?.[1]) return match[1].toUpperCase();
+  for (const p of patterns) {
+    const m = raw.match(p);
+    if (m?.[1]) return m[1].toUpperCase();
   }
-
   return "";
 }
 
 function extractOptions(contentText = "") {
-  const lines = String(contentText)
-    .split("\n")
-    .map(x => x.trim())
-    .filter(Boolean);
-
+  const lines = String(contentText).split("\n").map(x => x.trim()).filter(Boolean);
   const options = [];
-
   for (let i = 0; i < lines.length; i++) {
-    const match = lines[i].match(/^([A-D])[\.)]\s*(.+)$/i);
-
-    if (match) {
-      options.push({
-        letter: match[1].toUpperCase(),
-        text: compactText(match[2])
-      });
-    } else if (/^[A-D][\.)]$/i.test(lines[i]) && lines[i + 1]) {
-      options.push({
-        letter: lines[i].replace(/[\.)]/g, "").toUpperCase(),
-        text: compactText(lines[i + 1])
-      });
+    const m = lines[i].match(/^([A-D])[\.)]\s*(.+)$/i);
+    if (m) options.push({ letter: m[1].toUpperCase(), text: compactText(m[2]) });
+    else if (/^[A-D][\.)]$/i.test(lines[i]) && lines[i + 1]) {
+      options.push({ letter: lines[i].replace(/[\.)]/g, "").toUpperCase(), text: compactText(lines[i + 1]) });
     }
   }
-
   const unique = {};
-  options.forEach(o => {
-    if (!unique[o.letter]) unique[o.letter] = o;
-  });
-
-  return ["A", "B", "C", "D"].map(letter => unique[letter]).filter(Boolean);
+  options.forEach(o => { if (!unique[o.letter]) unique[o.letter] = o; });
+  return ["A", "B", "C", "D"].map(l => unique[l]).filter(Boolean);
 }
 
 function hasMeaningfulSolution(text = "") {
   const value = compactText(text).toLowerCase();
-
-  const markers = [
-    "solution",
-    "explanation",
-    "explaination",
-    "key concept",
-    "correct answer is",
-    "right answer is",
-    "answer is",
-    "solution is",
-    "option a is the correct answer",
-    "option b is the correct answer",
-    "option c is the correct answer",
-    "option d is the correct answer"
-  ];
-
-  if (!markers.some(marker => value.includes(marker))) return false;
-
+  const markers = ["solution", "explanation", "explaination", "key concept", "correct answer is", "right answer is", "answer is", "solution is", "option a is the correct answer", "option b is the correct answer", "option c is the correct answer", "option d is the correct answer"];
+  if (!markers.some(m => value.includes(m))) return false;
   const cleaned = value
     .replace(/the correct answer is:?\s*(option)?\s*[a-d]/gi, "")
     .replace(/correct answer is:?\s*(option)?\s*[a-d]/gi, "")
@@ -296,68 +199,39 @@ function hasMeaningfulSolution(text = "") {
     .replace(/video solution/g, "")
     .replace(/none/g, "")
     .trim();
-
   return cleaned.length > 10;
 }
 
 function hasVideoSolution(contentEl) {
   if (!contentEl) return false;
-
-  const selectors = [
-    "video",
-    "iframe",
-    "a[href*='youtube']",
-    "a[href*='youtu.be']",
-    "a[href*='vimeo']",
-    "a[href*='video']",
-    "[class*='video']",
-    "[src*='video']",
-    "[src*='youtube']",
-    "[src*='vimeo']"
-  ];
-
-  return selectors.some(selector => contentEl.querySelector(selector));
+  const selectors = ["video", "iframe", "a[href*='youtube']", "a[href*='youtu.be']", "a[href*='vimeo']", "a[href*='video']", "[class*='video']", "[src*='video']", "[src*='youtube']", "[src*='vimeo']"];
+  return selectors.some(sel => contentEl.querySelector(sel));
 }
 
 function imageWarnings(contentEl) {
   const warnings = [];
   if (!contentEl) return warnings;
-
   Array.from(contentEl.querySelectorAll("img")).forEach((img, idx) => {
     const label = `Image ${idx + 1}`;
-
     if (!img.complete || img.naturalWidth === 0 || img.naturalHeight === 0) {
       warnings.push(`${label} may be broken/not loaded`);
       return;
     }
-
-    if (img.naturalWidth < 80 || img.naturalHeight < 80) {
-      warnings.push(`${label} resolution too small (${img.naturalWidth}x${img.naturalHeight})`);
-    }
-
+    if (img.naturalWidth < 80 || img.naturalHeight < 80) warnings.push(`${label} resolution too small (${img.naturalWidth}x${img.naturalHeight})`);
     const parent = img.parentElement;
-
     if (parent) {
       const ps = getComputedStyle(parent);
       const ir = img.getBoundingClientRect();
       const pr = parent.getBoundingClientRect();
-      const hidden =
-        ps.overflow === "hidden" ||
-        ps.overflowX === "hidden" ||
-        ps.overflowY === "hidden";
-
-      if (hidden && (ir.bottom > pr.bottom + 2 || ir.right > pr.right + 2)) {
-        warnings.push(`${label} may be cropped/cut`);
-      }
+      const hidden = ps.overflow === "hidden" || ps.overflowX === "hidden" || ps.overflowY === "hidden";
+      if (hidden && (ir.bottom > pr.bottom + 2 || ir.right > pr.right + 2)) warnings.push(`${label} may be cropped/cut`);
     }
   });
-
   return warnings;
 }
 
-function extractQuestions(root, options = {}) {
+function extractQuestions(root, options) {
   if (!root) return { questions: [], reportRows: [] };
-
   const titles = Array.from(root.querySelectorAll("mat-card-title")).filter(isVisible);
   const contents = Array.from(root.querySelectorAll("mat-card-content"));
   const questions = [];
@@ -367,19 +241,12 @@ function extractQuestions(root, options = {}) {
     const questionText = compactText(title.innerText || "");
     const contentEl = contents[index];
     const contentText = contentEl?.innerText || "";
-    const greenOptions = contentEl
-      ? Array.from(contentEl.querySelectorAll(".bg-green-200, .bg-green-100, [class*='green']"))
-      : [];
-
+    const greenOptions = contentEl ? Array.from(contentEl.querySelectorAll(".bg-green-200, .bg-green-100, [class*='green']")) : [];
     const adminAnswers = greenOptions.map(opt => getOptionLetter(opt.innerText)).filter(Boolean);
     const solutionAnswer = getSolutionAnswer(contentText);
     const opts = extractOptions(contentText);
     const videoStatus = hasVideoSolution(contentEl) ? "Attached" : "Missing";
-
-    const qnoMatch =
-      questionText.match(/^\s*(?:Q\s*)?(\d+)[\.)]\s+/i) ||
-      questionText.match(/\b(?:Q\s*)?(\d+)[\.)]\s+/i);
-
+    const qnoMatch = questionText.match(/^\s*(?:Q\s*)?(\d+)[\.)]\s+/i) || questionText.match(/\b(?:Q\s*)?(\d+)[\.)]\s+/i);
     const qno = qnoMatch ? Number(qnoMatch[1]) : index + 1;
 
     const q = {
@@ -400,75 +267,61 @@ function extractQuestions(root, options = {}) {
 
     function addError(ruleId, check, details) {
       q.hasError = true;
-      rows.push(reportRow({
-        priority: "Critical",
-        type: "Question",
-        qno,
-        ruleId,
-        check,
-        status: "ERROR",
-        details,
-        adminAnswer: q.adminAnswer,
-        solutionAnswer: q.solutionAnswer,
-        optionsCount: q.optionsCount,
-        videoSolution: q.videoSolution
-      }));
+      rows.push(reportRow({ priority: "Critical", type: "Question", qno, ruleId, check, status: "ERROR", details, adminAnswer: q.adminAnswer, solutionAnswer: q.solutionAnswer, optionsCount: q.optionsCount, videoSolution: q.videoSolution }));
     }
-
     function addWarning(ruleId, check, details) {
-      rows.push(reportRow({
-        priority: "Warning",
-        type: "Question",
-        qno,
-        ruleId,
-        check,
-        status: "WARNING",
-        details,
-        adminAnswer: q.adminAnswer,
-        solutionAnswer: q.solutionAnswer,
-        optionsCount: q.optionsCount,
-        videoSolution: q.videoSolution
-      }));
+      rows.push(reportRow({ priority: "Warning", type: "Question", qno, ruleId, check, status: "WARNING", details, adminAnswer: q.adminAnswer, solutionAnswer: q.solutionAnswer, optionsCount: q.optionsCount, videoSolution: q.videoSolution }));
     }
 
-    if (!questionText && !contentEl?.querySelector("img")) {
-      addError("Q001", "Question", "Question missing");
-    }
+    if (!questionText) addError("Q001", "Question", "Question missing");
+    if (adminAnswers.length === 0) addError("Q002", "Correct Answer", "Correct answer not marked in green");
+    if (adminAnswers.length > 1) addError("Q003", "Correct Answer", `Multiple correct answers marked: ${adminAnswers.join(", ")}`);
+    if (adminAnswers.length === 1 && solutionAnswer && adminAnswers[0] !== solutionAnswer) addError("Q004", "Answer Mismatch", `Green marked ${adminAnswers[0]}, Solution says ${solutionAnswer}`);
+    if (!hasMeaningfulSolution(contentText)) addError("Q005", "Solution", "Solution/Explanation missing");
 
-    if (adminAnswers.length === 0) {
-      addError("Q002", "Correct Answer", "Correct answer not marked in green");
-    }
-
-    if (adminAnswers.length > 1) {
-      addError("Q003", "Correct Answer", `Multiple correct answers marked: ${adminAnswers.join(", ")}`);
-    }
-
-    if (adminAnswers.length === 1 && solutionAnswer && adminAnswers[0] !== solutionAnswer) {
-      addError("Q004", "Answer Mismatch", `Green marked ${adminAnswers[0]}, Solution says ${solutionAnswer}`);
-    }
-
-    if (!hasMeaningfulSolution(contentText)) {
-      addError("Q005", "Solution", "Solution/Explanation missing");
-    }
-
-    if (opts.length !== 4) {
-      addWarning("W001", "Options Count", `Options count is ${opts.length}, expected exactly 4`);
-    }
-
-    if (options.videoRequired === true && videoStatus === "Missing") {
-      addWarning("W002", "Video Solution", "Video solution missing while video checkbox is ON");
-    }
-
-    if (questionText.length > 0 && questionText.length < 10) {
-      addWarning("W004", "Question Text", "Question text too short / image-based question");
-    }
-
+    if (opts.length !== 4) addWarning("W001", "Options Count", `Options count is ${opts.length}, expected 4`);
+    if (options?.hasVideoSolutions === true && videoStatus === "Missing") {
+      addWarning("W002", "Video Solution", "Video solution missing");
+   }
+    if (questionText.length > 0 && questionText.length < 10) addWarning("W004", "Question Text", "Question text too short / image-based question");
     imageWarnings(contentEl).forEach(msg => addWarning("W006", "Image Quality", msg));
 
     questions.push(q);
   });
 
   return { questions, reportRows: rows };
+}
+
+
+function robustClick(el) {
+  if (!el) return false;
+  try { el.scrollIntoView({ block: "center", inline: "center" }); } catch {}
+
+  const rect = el.getBoundingClientRect();
+  const opts = {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    clientX: rect.left + rect.width / 2,
+    clientY: rect.top + rect.height / 2
+  };
+
+  ["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach(type => {
+    try { el.dispatchEvent(new MouseEvent(type, opts)); } catch {}
+  });
+
+  try { el.click(); } catch {}
+  return true;
+}
+
+function isPwLiveEmail(email = "") {
+  const value = String(email || "").trim();
+  if (!value) return true;
+  return /^[A-Za-z0-9._%+-]+@pw\.live$/i.test(value);
+}
+
+function getRequestEmail(options = {}) {
+  return options.qcUserEmail || options.userEmail || options.email || "";
 }
 
 function questionUniqueKey(q) {
@@ -482,7 +335,7 @@ function questionUniqueKey(q) {
   return `${q.qno}|${textKey}`.slice(0, 500);
 }
 
-function findNextButton(root) {
+function findPreviewNextButton() {
   const candidates = Array.from(document.querySelectorAll("button,[role='button'],a"))
     .filter(isVisible)
     .map(btn => {
@@ -511,9 +364,8 @@ function findNextButton(root) {
       if (!looksNext || disabled) return null;
 
       const rect = btn.getBoundingClientRect();
-      const inPreviewDialog = Boolean(
-        btn.closest("mat-dialog-container,.mat-mdc-dialog-container,.cdk-overlay-pane,[role='dialog']")?.querySelector("mat-card-title")
-      );
+      const dialog = btn.closest("mat-dialog-container,.mat-mdc-dialog-container,.cdk-overlay-pane,[role='dialog']");
+      const inPreviewDialog = Boolean(dialog?.querySelector("mat-card-title"));
 
       return {
         btn,
@@ -530,18 +382,13 @@ async function scanPreview(options = {}) {
   const firstRoot = getPreviewRoot();
 
   if (!firstRoot) {
-    return {
-      questions: [],
-      reportRows: [],
-      imagesFound: 0,
-      previewChecked: false
-    };
+    return { questions: [], reportRows: [], imagesFound: 0, previewChecked: false };
   }
 
   const allQuestions = [];
   const rows = [];
-  const seenQuestionKeys = new Set();
-  const seenPageSignatures = new Set();
+  const seenQuestions = new Set();
+  const seenPages = new Set();
   const maxPages = 100;
 
   for (let page = 1; page <= maxPages; page++) {
@@ -555,24 +402,23 @@ async function scanPreview(options = {}) {
 
     current.questions.forEach(q => {
       const key = questionUniqueKey(q);
-      if (!seenQuestionKeys.has(key)) {
-        seenQuestionKeys.add(key);
+      if (!seenQuestions.has(key)) {
+        seenQuestions.add(key);
         allQuestions.push(q);
       }
     });
 
     rows.push(...current.reportRows);
 
-    const nextButton = findNextButton(pageRoot);
+    const nextButton = findPreviewNextButton();
     if (!nextButton) break;
 
-    if (signature && seenPageSignatures.has(signature)) break;
-    if (signature) seenPageSignatures.add(signature);
+    if (signature && seenPages.has(signature)) break;
+    if (signature) seenPages.add(signature);
 
     robustClick(nextButton);
 
     let changed = false;
-
     for (let wait = 0; wait < 12; wait++) {
       await sleep(500);
       const afterRoot = getPreviewRoot() || pageRoot;
@@ -606,35 +452,204 @@ function duplicateRows(questions) {
   return [];
 }
 
+function getTestRowActionButtons() {
+  return Array.from(document.querySelectorAll("button,[role='button']"))
+    .filter(isVisible)
+    .filter(btn => {
+      const text = compactText(btn.innerText || btn.textContent || "").toLowerCase();
+      const icon = compactText(btn.querySelector("mat-icon")?.innerText || "").toLowerCase();
+      const rect = btn.getBoundingClientRect();
+      const looksMenu = text === "more_vert" || icon === "more_vert" || icon.includes("more_vert") || text === "⋮";
+      return looksMenu && rect.top > 250 && rect.left > window.innerWidth * 0.55;
+    })
+    .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+}
+
+async function clickFirstRowMenuItem(itemRegex) {
+  window.__QC_LAST_MENU_TEXTS__ = [];
+  const buttons = getTestRowActionButtons();
+
+  for (const btn of buttons) {
+    robustClick(btn);
+    await sleep(1000);
+
+    const panes = Array.from(document.querySelectorAll(".cdk-overlay-pane,.mat-menu-panel,.mat-mdc-menu-panel,[role='menu']"))
+      .filter(el => {
+        const text = compactText(el.innerText || el.textContent || "");
+        return text.includes("Preview Test") || text.includes("Edit Test") || text.includes("Download Questions");
+      });
+
+    const pane = panes.pop();
+
+    if (!pane) {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
+      await sleep(400);
+      continue;
+    }
+
+    window.__QC_LAST_MENU_TEXTS__ = [compactText(pane.innerText || pane.textContent || "")];
+
+    const items = Array.from(pane.querySelectorAll("button,[role='menuitem'],a,div,span"))
+      .filter(isVisible)
+      .map(el => ({
+        text: compactText(el.innerText || el.textContent || ""),
+        clickable: el.closest("button,[role='menuitem'],a") || el
+      }))
+      .filter(x => x.text && x.text !== "more_vert");
+
+    const item = items.find(x => itemRegex.test(x.text));
+
+    if (item) {
+      robustClick(item.clickable);
+      await sleep(3000);
+      return true;
+    }
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
+    await sleep(400);
+  }
+
+  return false;
+}
+
+async function openPreviewTest() {
+  if (getPreviewRoot()) return true;
+
+  const clicked = await clickFirstRowMenuItem(/Preview Test & Questions/i);
+  if (clicked) {
+    await sleep(1500);
+    return Boolean(getPreviewRoot());
+  }
+
+  return Boolean(getPreviewRoot());
+}
+
+async function closePreview() {
+  const closeCandidates = Array.from(document.querySelectorAll(
+    "button[aria-label='Close'],button[aria-label='close'],button[mat-dialog-close],.mat-dialog-close,.mat-mdc-dialog-close,button"
+  ))
+    .filter(isVisible)
+    .map(btn => {
+      const text = compactText(`${btn.innerText || ""} ${btn.getAttribute("aria-label") || ""} ${btn.getAttribute("title") || ""}`).toLowerCase();
+      const icon = compactText(btn.querySelector("mat-icon")?.innerText || "").toLowerCase();
+      const dialog = btn.closest("mat-dialog-container,.mat-mdc-dialog-container,.cdk-overlay-pane,[role='dialog']");
+      const inPreviewDialog = Boolean(dialog?.querySelector("mat-card-title"));
+
+      let score = 0;
+      if (inPreviewDialog) score += 10000;
+      if (text === "close" || text.includes("close")) score += 200;
+      if (icon === "close" || icon === "cancel") score += 200;
+
+      return { btn, score };
+    })
+    .filter(x => x.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  if (closeCandidates[0]) {
+    robustClick(closeCandidates[0].btn);
+    await sleep(1200);
+    if (!getPreviewRoot()) return true;
+  }
+
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
+  await sleep(1200);
+  return !getPreviewRoot();
+}
+
+async function openEditTest() {
+  if (getEditRoot()) return true;
+
+  if (getPreviewRoot()) {
+    await closePreview();
+    await sleep(1200);
+  }
+
+  const clicked = await clickFirstRowMenuItem(/Edit Test/i);
+  if (clicked) {
+    await sleep(1800);
+    return true;
+  }
+
+  return Boolean(getEditRoot());
+}
+
+async function goToEditStep2() {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const root = getEditRoot() || document;
+    const text = compactText(root.innerText || root.textContent || "").toLowerCase();
+
+    if (text.includes("allow submit") || text.includes("duration in minutes") || text.includes("total questions")) {
+      return true;
+    }
+
+    const saveNext = Array.from(document.querySelectorAll("button,[role='button'],a"))
+      .filter(isVisible)
+      .map(el => ({
+        el,
+        text: compactText(`${el.innerText || el.textContent || ""} ${el.getAttribute("aria-label") || ""} ${el.getAttribute("title") || ""}`)
+      }))
+      .find(x => /save\s*&\s*next/i.test(x.text));
+
+    if (!saveNext) return false;
+
+    robustClick(saveNext.el);
+    await sleep(2500);
+  }
+
+  const root = getEditRoot() || document;
+  const text = compactText(root.innerText || root.textContent || "").toLowerCase();
+  return text.includes("allow submit") || text.includes("duration in minutes") || text.includes("total questions");
+}
+
+async function closeEditTest() {
+  const closeCandidates = Array.from(document.querySelectorAll(
+    "button[aria-label='Close'],button[aria-label='close'],button[mat-dialog-close],.mat-dialog-close,.mat-mdc-dialog-close,button"
+  ))
+    .filter(isVisible)
+    .map(btn => {
+      const text = compactText(`${btn.innerText || ""} ${btn.getAttribute("aria-label") || ""} ${btn.getAttribute("title") || ""}`).toLowerCase();
+      const icon = compactText(btn.querySelector("mat-icon")?.innerText || "").toLowerCase();
+
+      let score = 0;
+      if (text === "close" || text.includes("close")) score += 200;
+      if (icon === "close" || icon === "cancel") score += 200;
+
+      return { btn, score };
+    })
+    .filter(x => x.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  if (closeCandidates[0]) {
+    robustClick(closeCandidates[0].btn);
+    await sleep(1200);
+    return true;
+  }
+
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
+  await sleep(1200);
+  return true;
+}
+
 function numberFromInput(input) {
   if (!input) return null;
-
-  const raw = String(input.value ?? input.getAttribute("value") ?? "")
-    .trim()
-    .replace(/,/g, "");
-
+  const raw = String(input.value ?? input.getAttribute("value") ?? "").trim().replace(/,/g, "");
   const n = Number(raw);
-
   return Number.isFinite(n) ? n : null;
 }
 
 function getNumberByLabel(root, labelRegex, excludeRegex) {
   if (!root) return null;
-
   const candidates = [];
 
   Array.from(root.querySelectorAll("mat-form-field, .mat-mdc-form-field, .mat-form-field")).forEach(field => {
     const label = compactText(field.innerText || field.textContent || "");
-
     if (!labelRegex.test(label)) return;
     if (excludeRegex && excludeRegex.test(label)) return;
 
     const input = field.querySelector("input[type='number'], input[type='text'], input:not([type])");
     const value = numberFromInput(input);
 
-    if (value !== null) {
-      candidates.push({ value, label, score: 100 });
-    }
+    if (value !== null) candidates.push({ value, label, score: 100 });
   });
 
   Array.from(root.querySelectorAll("input[type='number']")).forEach(input => {
@@ -656,7 +671,6 @@ function getNumberByLabel(root, labelRegex, excludeRegex) {
   });
 
   candidates.sort((a, b) => b.score - a.score);
-
   return candidates[0]?.value ?? null;
 }
 
@@ -685,7 +699,6 @@ function checkboxChecked(inputOrHolder) {
 
 function getCheckboxState(root, labelText) {
   if (!root) return null;
-
   const target = labelText.toLowerCase();
 
   const holders = Array.from(root.querySelectorAll("mat-checkbox, .mat-checkbox, .mat-mdc-checkbox, label, input[type='checkbox']"));
@@ -698,55 +711,14 @@ function getCheckboxState(root, labelText) {
     const text = compactText(holder.innerText || holder.textContent || "").toLowerCase();
     const aria = compactText(`${h.getAttribute("aria-label") || ""} ${h.getAttribute("name") || ""}`).toLowerCase();
 
-    if (text.includes(target) || aria.includes(target)) {
-      return checkboxChecked(h);
-    }
-  }
-
-  const textNodes = [];
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-
-  let node;
-  while ((node = walker.nextNode())) {
-    const text = compactText(node.nodeValue || "").toLowerCase();
-
-    if (text.includes(target) && node.parentElement && isVisible(node.parentElement)) {
-      textNodes.push(node.parentElement);
-    }
-  }
-
-  for (const labelEl of textNodes) {
-    const labelRect = labelEl.getBoundingClientRect();
-
-    const candidates = Array.from(root.querySelectorAll("input[type='checkbox']"))
-      .map(input => {
-        const holder = input.closest("mat-checkbox,.mat-checkbox,.mat-mdc-checkbox,label") || input.parentElement || input;
-        const rect = holder.getBoundingClientRect();
-        const dy = Math.abs((rect.top + rect.bottom) / 2 - (labelRect.top + labelRect.bottom) / 2);
-        const dx = Math.abs(rect.right - labelRect.left);
-
-        return {
-          input,
-          dy,
-          dx,
-          score: dy * 20 + dx,
-          rect
-        };
-      })
-      .filter(x => x.rect.left <= labelRect.left + 40 && x.score < 800)
-      .sort((a, b) => a.score - b.score);
-
-    if (candidates[0]) return checkboxChecked(candidates[0].input);
+    if (text.includes(target) || aria.includes(target)) return checkboxChecked(h);
   }
 
   return null;
 }
 
 function getValueAfterLabel(text, regex) {
-  const lines = cleanText(text)
-    .split("\n")
-    .map(x => x.trim())
-    .filter(Boolean);
+  const lines = cleanText(text).split("\n").map(x => x.trim()).filter(Boolean);
 
   for (let i = 0; i < lines.length; i++) {
     if (regex.test(lines[i])) {
@@ -760,21 +732,16 @@ function getValueAfterLabel(text, regex) {
 
 function findDurations(text) {
   const found = [];
-
   const patterns = [
     /(?:duration|time\s*given|total\s*duration)[^\d]{0,50}(\d+)\s*(?:minutes?|mins?)/gi,
     /(\d+)\s*(?:minutes?|mins?)\s*(?:duration|time)/gi
   ];
 
   patterns.forEach(re => {
-    let match;
-
-    while ((match = re.exec(text)) !== null) {
-      const n = Number(match[1]);
-
-      if (n > 0 && n < 1000 && !found.includes(n)) {
-        found.push(n);
-      }
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const n = Number(m[1]);
+      if (n > 0 && n < 1000 && !found.includes(n)) found.push(n);
     }
   });
 
@@ -785,390 +752,46 @@ function syllabusStatus(text) {
   const value = getValueAfterLabel(text, /^syllabus\b.*?/i);
   const hasWord = /\bsyllabus\b/i.test(text);
   const missing = !value || /^(none|na|n\/a|null|undefined|-)?$/i.test(value);
-
-  return {
-    found: hasWord,
-    missing,
-    value
-  };
-}
-
-
-function robustClick(el) {
-  if (!el) return false;
-  try {
-    el.scrollIntoView({ block: "center", inline: "center" });
-  } catch {}
-
-  const rect = el.getBoundingClientRect();
-  const opts = {
-    bubbles: true,
-    cancelable: true,
-    view: window,
-    clientX: rect.left + rect.width / 2,
-    clientY: rect.top + rect.height / 2
-  };
-
-  ["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach(type => {
-    try {
-      el.dispatchEvent(new MouseEvent(type, opts));
-    } catch {
-      try { el.click(); } catch {}
-    }
-  });
-
-  try { el.click(); } catch {}
-  return true;
-}
-
-function getTestRowActionButtons() {
-  return Array.from(document.querySelectorAll("button,[role='button']"))
-    .filter(isVisible)
-    .filter(btn => {
-      const text = compactText(btn.innerText || btn.textContent || "").toLowerCase();
-      const icon = compactText(btn.querySelector("mat-icon")?.innerText || "").toLowerCase();
-      const rect = btn.getBoundingClientRect();
-
-      const looksMenu =
-        text === "more_vert" ||
-        icon === "more_vert" ||
-        icon.includes("more_vert") ||
-        text === "⋮";
-
-      return looksMenu && rect.top > 250 && rect.left > window.innerWidth * 0.55;
-    })
-    .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
-}
-
-async function clickFirstRowMenuItem(itemRegex) {
-  const menuButtons = getTestRowActionButtons();
-  window.__QC_LAST_MENU_TEXTS__ = [];
-
-  for (const btn of menuButtons) {
-    robustClick(btn);
-    await sleep(900);
-
-    const panes = Array.from(document.querySelectorAll(".cdk-overlay-pane,.mat-menu-panel,.mat-mdc-menu-panel,[role='menu']"))
-      .filter(el => {
-        const text = compactText(el.innerText || el.textContent || "");
-        return text.includes("Preview Test") || text.includes("Edit Test") || text.includes("Download Questions");
-      });
-
-    const pane = panes.pop();
-
-    if (!pane) {
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
-      await sleep(400);
-      continue;
-    }
-
-    window.__QC_LAST_MENU_TEXTS__ = [compactText(pane.innerText || pane.textContent || "")];
-
-    const item = Array.from(pane.querySelectorAll("button,[role='menuitem'],a,div,span"))
-      .filter(isVisible)
-      .map(el => {
-        const clickable = el.closest("button,[role='menuitem'],a") || el;
-        const text = compactText(el.innerText || el.textContent || "");
-        return { clickable, text };
-      })
-      .filter(x => x.text && x.text !== "more_vert")
-      .find(x => itemRegex.test(x.text));
-
-    if (item) {
-      robustClick(item.clickable);
-      await sleep(3000);
-      return true;
-    }
-
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
-    await sleep(400);
-  }
-
-  return false;
-}
-
-async function openPreviewTest() {
-  if (getPreviewRoot()) return true;
-
-  const clicked = await clickFirstRowMenuItem(/Preview Test & Questions/i);
-
-  if (clicked) {
-    await sleep(1500);
-    return Boolean(getPreviewRoot());
-  }
-
-  return Boolean(getPreviewRoot());
-}
-
-
-function clickVisibleButtonByText(textPatterns, root = document) {
-  const patterns = textPatterns.map(x => x instanceof RegExp ? x : new RegExp(String(x), "i"));
-
-  const candidates = Array.from(root.querySelectorAll("button,[role='button'],a,mat-icon"))
-    .filter(isVisible)
-    .map(el => {
-      const button = el.closest("button,[role='button'],a") || el;
-
-      const text = compactText([
-        button.innerText || "",
-        button.getAttribute("aria-label") || "",
-        button.getAttribute("title") || "",
-        el.innerText || ""
-      ].join(" "));
-
-      return { el: button, text };
-    })
-    .filter(x => patterns.some(pattern => pattern.test(x.text)));
-
-  if (!candidates.length) return false;
-
-  candidates[0].el.click();
-  return true;
-}
-
-async function closePreview() {
-  const closeCandidates = Array.from(document.querySelectorAll(
-    "button[aria-label='Close'],button[aria-label='close'],button[mat-dialog-close],.mat-dialog-close,.mat-mdc-dialog-close,button"
-  ))
-    .filter(isVisible)
-    .map(btn => {
-      const text = compactText(`${btn.innerText || ""} ${btn.getAttribute("aria-label") || ""} ${btn.getAttribute("title") || ""}`).toLowerCase();
-      const icon = compactText(btn.querySelector("mat-icon")?.innerText || "").toLowerCase();
-      const inPreviewDialog = Boolean(
-        btn.closest("mat-dialog-container,.mat-mdc-dialog-container,.cdk-overlay-pane,[role='dialog']")?.querySelector("mat-card-title")
-      );
-
-      let score = 0;
-      if (inPreviewDialog) score += 10000;
-      if (text === "close" || text.includes("close")) score += 200;
-      if (text === "x" || text === "×") score += 100;
-      if (icon === "close" || icon === "cancel") score += 200;
-
-      return { btn, score };
-    })
-    .filter(x => x.score > 0)
-    .sort((a, b) => b.score - a.score);
-
-  if (closeCandidates[0]) {
-    robustClick(closeCandidates[0].btn);
-    await sleep(1200);
-    if (!getPreviewRoot()) return true;
-  }
-
-  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
-  await sleep(1200);
-
-  return !getPreviewRoot();
-}
-
-function getThreeDotButtons() {
-  return Array.from(document.querySelectorAll("button,[role='button']"))
-    .filter(isVisible)
-    .filter(btn => {
-      const label = (btn.getAttribute("aria-label") || "").toLowerCase();
-      const title = (btn.getAttribute("title") || "").toLowerCase();
-      const text = compactText(btn.innerText || "").toLowerCase();
-      const icon = compactText(btn.querySelector("mat-icon")?.innerText || "").toLowerCase();
-
-      return (
-        label.includes("more") ||
-        title.includes("more") ||
-        text === "more_vert" ||
-        icon === "more_vert" ||
-        icon.includes("more_vert") ||
-        text === "⋮"
-      );
-    });
-}
-
-async function openEditTest() {
-  if (getEditRoot()) return true;
-
-  if (getPreviewRoot()) {
-    await closePreview();
-    await sleep(1200);
-  }
-
-  const clicked = await clickFirstRowMenuItem(/Edit Test/i);
-
-  if (clicked) {
-    await sleep(1800);
-    return Boolean(getEditRoot());
-  }
-
-  return Boolean(getEditRoot());
-}
-
-async function goToEditStep2() {
-  let root = getEditRoot();
-
-  for (let attempt = 0; attempt < 4; attempt++) {
-    root = getEditRoot() || document;
-    const text = compactText(root.innerText || root.textContent || "").toLowerCase();
-
-    if (
-      text.includes("allow submit") ||
-      text.includes("duration in minutes") ||
-      text.includes("total questions")
-    ) {
-      return true;
-    }
-
-    const saveNextButton = Array.from(document.querySelectorAll("button,[role='button'],a"))
-      .filter(isVisible)
-      .map(el => {
-        const label = compactText([
-          el.innerText || el.textContent || "",
-          el.getAttribute("aria-label") || "",
-          el.getAttribute("title") || ""
-        ].join(" "));
-        return { el, label };
-      })
-      .find(x => /^save\s*&\s*next$/i.test(x.label) || /save\s*&\s*next/i.test(x.label));
-
-    if (!saveNextButton) return false;
-
-    robustClick(saveNextButton.el);
-    await sleep(2500);
-  }
-
-  root = getEditRoot() || document;
-  const finalText = compactText(root.innerText || root.textContent || "").toLowerCase();
-
-  return (
-    finalText.includes("allow submit") ||
-    finalText.includes("duration in minutes") ||
-    finalText.includes("total questions")
-  );
+  return { found: hasWord, missing, value };
 }
 
 function readEditConfig(scannedCount) {
   const rows = [];
-  const root = getEditRoot();
-
-  if (!root) {
-    return {
-      found: false,
-      rows,
-      config: {
-        allowSubmit: null,
-        totalQuestions: null,
-        duration: null,
-        syllabus: null,
-        videoRequired: false
-      }
-    };
-  }
-
+  const root = getEditRoot() || document;
   const text = cleanText(root.innerText || root.textContent || "");
 
-  const totalQuestions = getNumberByLabel(
-    root,
-    /total\s+questions\s*\*?/i,
-    /display\s+order|total\s+marks|duration|available/i
-  );
-
-  const duration = getNumberByLabel(
-    root,
-    /duration\s+in\s+minutes\s*\*?/i,
-    /display\s+order|total\s+questions|total\s+marks|available/i
-  );
-
+  const totalQuestions = getNumberByLabel(root, /total\s+questions\s*\*?/i, /display\s+order|total\s+marks|duration|available/i);
+  const duration = getNumberByLabel(root, /duration\s+in\s+minutes\s*\*?/i, /display\s+order|total\s+questions|total\s+marks|available/i);
   const allowSubmit = getCheckboxState(root, "Allow Submit");
   const disableVideo = getCheckboxState(root, "Disable Video Solution");
   const videoRequired = disableVideo === false;
   const syllabus = syllabusStatus(text);
 
   if (allowSubmit === false) {
-    rows.push(reportRow({
-      priority: "Critical",
-      type: "Test",
-      qno: "-",
-      ruleId: "T001",
-      check: "Allow Submit",
-      status: "ERROR",
-      details: "Allow Submit is not checked"
-    }));
+    rows.push(reportRow({ priority: "Critical", type: "Test", qno: "-", ruleId: "T001", check: "Allow Submit", status: "ERROR", details: "Allow Submit is not checked" }));
   } else if (allowSubmit === null) {
-    rows.push(reportRow({
-      priority: "Warning",
-      type: "Test",
-      qno: "-",
-      ruleId: "T001",
-      check: "Allow Submit",
-      status: "WARNING",
-      details: "Allow Submit checkbox not found"
-    }));
+    rows.push(reportRow({ priority: "Warning", type: "Test", qno: "-", ruleId: "T001", check: "Allow Submit", status: "WARNING", details: "Allow Submit checkbox not found" }));
   }
 
   if (totalQuestions === null) {
-    rows.push(reportRow({
-      priority: "Warning",
-      type: "Test",
-      qno: "-",
-      ruleId: "T002",
-      check: "Total Questions",
-      status: "WARNING",
-      details: "Total Questions field not found"
-    }));
+    rows.push(reportRow({ priority: "Warning", type: "Test", qno: "-", ruleId: "T002", check: "Total Questions", status: "WARNING", details: "Total Questions field not found" }));
   } else if (scannedCount > 0 && totalQuestions !== scannedCount) {
-    rows.push(reportRow({
-      priority: "Critical",
-      type: "Test",
-      qno: "-",
-      ruleId: "T002",
-      check: "Total Questions",
-      status: "ERROR",
-      details: `Total Questions field = ${totalQuestions}, Scanned = ${scannedCount}`
-    }));
+    rows.push(reportRow({ priority: "Critical", type: "Test", qno: "-", ruleId: "T002", check: "Total Questions", status: "ERROR", details: `Total Questions field = ${totalQuestions}, Scanned = ${scannedCount}` }));
   }
 
   if (duration === null) {
-    rows.push(reportRow({
-      priority: "Critical",
-      type: "Test",
-      qno: "-",
-      ruleId: "T003",
-      check: "Duration",
-      status: "ERROR",
-      details: "Duration In Minutes field missing"
-    }));
+    rows.push(reportRow({ priority: "Critical", type: "Test", qno: "-", ruleId: "T003", check: "Duration", status: "ERROR", details: "Duration In Minutes field missing" }));
   } else {
     const instructionDurations = findDurations(text);
-
     if (instructionDurations.length === 0) {
-      rows.push(reportRow({
-        priority: "Warning",
-        type: "Test",
-        qno: "-",
-        ruleId: "T004",
-        check: "Duration in Instructions",
-        status: "WARNING",
-        details: "Duration not mentioned in instructions"
-      }));
+      rows.push(reportRow({ priority: "Warning", type: "Test", qno: "-", ruleId: "T004", check: "Duration in Instructions", status: "WARNING", details: "Duration not mentioned in instructions" }));
     } else if (!instructionDurations.includes(duration)) {
-      rows.push(reportRow({
-        priority: "Critical",
-        type: "Test",
-        qno: "-",
-        ruleId: "T004",
-        check: "Duration in Instructions",
-        status: "ERROR",
-        details: `Duration field = ${duration} min, Instructions = ${instructionDurations.join("/")} min`
-      }));
+      rows.push(reportRow({ priority: "Critical", type: "Test", qno: "-", ruleId: "T004", check: "Duration in Instructions", status: "ERROR", details: `Duration field = ${duration} min, Instructions = ${instructionDurations.join("/")} min` }));
     }
   }
 
   if (!syllabus.found || syllabus.missing) {
-    rows.push(reportRow({
-      priority: "Critical",
-      type: "Test",
-      qno: "-",
-      ruleId: "T005",
-      check: "Syllabus",
-      status: "ERROR",
-      details: "Syllabus missing"
-    }));
+    rows.push(reportRow({ priority: "Critical", type: "Test", qno: "-", ruleId: "T005", check: "Syllabus", status: "ERROR", details: "Syllabus missing" }));
   }
 
   [
@@ -1190,62 +813,14 @@ function readEditConfig(scannedCount) {
     "Show all Comprehension Questions together"
   ].forEach(label => {
     if (getCheckboxState(root, label) === true) {
-      rows.push(reportRow({
-        priority: "Warning",
-        type: "Test",
-        qno: "-",
-        ruleId: "W003",
-        check: "Checkbox",
-        status: "WARNING",
-        details: `${label} is checked`
-      }));
+      rows.push(reportRow({ priority: "Warning", type: "Test", qno: "-", ruleId: "W003", check: "Checkbox", status: "WARNING", details: `${label} is checked` }));
     }
   });
 
   return {
-    found: true,
     rows,
-    config: {
-      allowSubmit,
-      totalQuestions,
-      duration,
-      syllabus: syllabus.value || null,
-      videoRequired
-    }
+    config: { allowSubmit, totalQuestions, duration, syllabus: syllabus.value || null, videoRequired }
   };
-}
-
-async function closeEditTest() {
-  const root = getEditRoot();
-  if (!root) return true;
-
-  const closeSelectors = [
-    "button[aria-label='Close']",
-    "button[aria-label='close']",
-    "button[mat-dialog-close]",
-    ".mat-dialog-close",
-    ".mat-mdc-dialog-close"
-  ];
-
-  for (const selector of closeSelectors) {
-    const button = Array.from(root.querySelectorAll(selector)).find(isVisible);
-
-    if (button) {
-      button.click();
-      await sleep(1000);
-      return !getEditRoot();
-    }
-  }
-
-  if (clickVisibleButtonByText([/^close$/i, /^cancel$/i, /^back$/i], root)) {
-    await sleep(1000);
-    return !getEditRoot();
-  }
-
-  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
-  await sleep(1000);
-
-  return !getEditRoot();
 }
 
 function buildCSV(rows) {
@@ -1272,90 +847,36 @@ function buildCSV(rows) {
   return csv;
 }
 
-function getRequestEmail(options = {}) {
-  return (
-    options.qcUserEmail ||
-    options.userEmail ||
-    options.email ||
-    ""
-  );
-}
-
 async function runDev3Flow(options = {}) {
   const rows = [];
   const email = getRequestEmail(options);
 
   if (!isPwLiveEmail(email)) {
-    rows.push(reportRow({
-      priority: "Critical",
-      type: "Test",
-      qno: "-",
-      ruleId: "AUTH001",
-      check: "Email Validation",
-      status: "ERROR",
-      details: "Only @pw.live email is allowed"
-    }));
-
-    return {
-      questions: [],
-      rows,
-      imagesFound: 0,
-      config: {}
-    };
+    rows.push(reportRow({ priority: "Critical", type: "Test", qno: "-", ruleId: "AUTH001", check: "Email Validation", status: "ERROR", details: "Only @pw.live email is allowed" }));
+    return { questions: [], rows, imagesFound: 0, config: {} };
   }
 
   let previewOpened = Boolean(getPreviewRoot());
+  if (!previewOpened) previewOpened = await openPreviewTest();
 
   if (!previewOpened) {
-    previewOpened = await openPreviewTest();
+    rows.push(reportRow({ priority: "Critical", type: "Test", qno: "-", ruleId: "T000", check: "Preview Test", status: "ERROR", details: "Preview Test & Questions could not be opened automatically" }));
+    return { questions: [], rows, imagesFound: 0, config: {} };
   }
 
-  if (!previewOpened) {
-    rows.push(reportRow({
-      priority: "Critical",
-      type: "Test",
-      qno: "-",
-      ruleId: "T000",
-      check: "Preview Test",
-      status: "ERROR",
-      details: "Preview Test & Questions could not be opened automatically"
-    }));
-
-    return {
-      questions: [],
-      rows,
-      imagesFound: 0,
-      config: {}
-    };
-  }
-
-  const preview = await scanPreview({ ...options, videoRequired: false });
+  const preview = await scanPreview({ ...options, hasVideoSolutions: false });
   rows.push(...preview.reportRows);
 
   await closePreview();
 
   const editOpened = await openEditTest();
-  let config = {
-    allowSubmit: null,
-    totalQuestions: null,
-    duration: null,
-    syllabus: null,
-    videoRequired: false
-  };
+  let config = { allowSubmit: null, totalQuestions: null, duration: null, syllabus: null, videoRequired: false };
 
   if (editOpened) {
     const step2Opened = await goToEditStep2();
 
     if (!step2Opened) {
-      rows.push(reportRow({
-        priority: "Warning",
-        type: "Test",
-        qno: "-",
-        ruleId: "T007",
-        check: "Edit Test Step 2",
-        status: "WARNING",
-        details: "Save & Next / Step 2 could not be opened automatically"
-      }));
+      rows.push(reportRow({ priority: "Warning", type: "Test", qno: "-", ruleId: "T007", check: "Edit Test Step 2", status: "WARNING", details: "Save & Next / Step 2 could not be opened automatically" }));
     }
 
     const edit = readEditConfig(preview.questions.length);
@@ -1397,22 +918,11 @@ async function runDev3Flow(options = {}) {
   rows.push(...duplicateRows(preview.questions));
   sortReportRows(rows);
 
-  return {
-    questions: preview.questions,
-    rows,
-    imagesFound: preview.imagesFound,
-    config
-  };
+  return { questions: preview.questions, rows, imagesFound: preview.imagesFound, config };
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (
-    request.action !== "RUN_QC" &&
-    request.action !== "RUN_QC_V2" &&
-    request.action !== "RUN_QC_DEV3"
-  ) {
-    return;
-  }
+  if (request.action !== "RUN_QC" && request.action !== "RUN_QC_V2" && request.action !== "RUN_QC_DEV3") return;
 
   (async () => {
     try {
@@ -1421,9 +931,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       const rows = result.rows;
 
       const questionErrorSet = new Set(
-        rows
-          .filter(r => r.type === "Question" && r.status === "ERROR")
-          .map(r => String(r.qno))
+        rows.filter(r => r.type === "Question" && r.status === "ERROR").map(r => String(r.qno))
       );
 
       const errorCount = rows.filter(r => r.status === "ERROR").length;
@@ -1445,20 +953,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         config: result.config || {}
       });
     } catch (err) {
-      console.error("QC Assistant DEV3 failed", err);
-
-      const rows = [
-        reportRow({
-          priority: "Critical",
-          type: "Test",
-          qno: "-",
-          ruleId: "RUNTIME",
-          check: "Runtime Error",
-          status: "ERROR",
-          details: err.message || String(err)
-        })
-      ];
-
+      console.error("QC Assistant DEV3 clean failed", err);
+      const rows = [reportRow({ priority: "Critical", type: "Test", qno: "-", ruleId: "RUNTIME", check: "Runtime Error", status: "ERROR", details: err.message || String(err) })];
       sendResponse({
         version: QC_VERSION,
         questionsFound: 0,
@@ -1471,7 +967,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         csv: buildCSV(rows),
         questions: [],
         issues: rows,
-        warnings: [],
+        warnings: rows,
         config: {}
       });
     }
