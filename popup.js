@@ -1,5 +1,5 @@
 const LOG_URL = "https://script.google.com/macros/s/AKfycbzSihN-ZnLwVtIfA_c9Mij1a6b7Hx6d2tUYe11ut6zNaVshEvMiW5bb9gPELROkkY-p/exec";
-const EXTENSION_VERSION = "3.0.2-dev3";
+const EXTENSION_VERSION = "3.0.5-dev3";
 
 let latestCSV = "";
 let latestResponse = null;
@@ -267,7 +267,7 @@ runButton.addEventListener("click", async () => {
   chrome.storage.local.set({ qcUser: qcEmail });
 
   runButton.disabled = true;
-  result.innerHTML = "Running QC DEV3.2... Please wait.";
+  result.innerHTML = "Running QC DEV3.5... Please wait.";
 
   try {
     const expectedInput = document.getElementById("expectedCount")?.value;
@@ -284,7 +284,7 @@ runButton.addEventListener("click", async () => {
     chrome.tabs.sendMessage(
       tab.id,
       {
-        action: "RUN_QC_DEV3",
+        action: "RUN_QC_DEV3.5",
         options: {
           qcUserEmail: qcEmail,
           manualExpectedQuestions,
@@ -295,7 +295,7 @@ runButton.addEventListener("click", async () => {
         runButton.disabled = false;
 
         if (chrome.runtime.lastError || !response) {
-          result.innerHTML = "Admin page refresh karo, Preview Test & Questions open karo, phir Run QC DEV3.2 dabao.";
+          result.innerHTML = "Admin page refresh karo, Preview Test & Questions open karo, phir Run QC DEV3.5 dabao.";
           return;
         }
 
@@ -344,7 +344,7 @@ runButton.addEventListener("click", async () => {
 
         sendLog({
           user: latestUser,
-          event: "RUN_QC_DEV3",
+          event: "RUN_QC_DEV3.5",
           testUrl: latestTabUrl,
           questionsFound: response.questionsFound,
           passCount: response.passCount,
@@ -357,7 +357,7 @@ runButton.addEventListener("click", async () => {
         });
 
         result.innerHTML = `
-          <b>QC Report DEV3.2</b><br><br>
+          <b>QC Report DEV3.5</b><br><br>
           Questions Found: ${response.questionsFound}<br>
           Question Errors: ${response.questionsWithErrors}<br>
           Report Errors: ${response.errorCount}<br>
@@ -387,7 +387,7 @@ runButton.addEventListener("click", async () => {
           const a = document.createElement("a");
 
           a.href = url;
-          a.download = `QC_Assistant_DEV3_Report_${Date.now()}.csv`;
+          a.download = `QC_Assistant_DEV3.5_Report_${Date.now()}.csv`;
           a.click();
 
           URL.revokeObjectURL(url);
