@@ -1,6 +1,6 @@
-console.log("QC Assistant DEV3 Loaded");
+console.log("QC Assistant DEV3.1 Loaded");
 
-const QC_VERSION = "3.0.0-dev3";
+const QC_VERSION = "3.0.1-dev3";
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function cleanText(text = "") {
@@ -483,26 +483,21 @@ function questionUniqueKey(q) {
 }
 
 function findNextButton(root) {
-  if (!root) return null;
+  const searchRoots = [];
 
-  const rootRect = root.getBoundingClientRect();
+  if (root) searchRoots.push(root);
+  searchRoots.push(document);
 
-  return Array.from(root.querySelectorAll("button,[role='button']"))
-    .filter(btn => {
-      if (!isVisible(btn)) return false;
+  const buttons = [];
 
-      const rect = btn.getBoundingClientRect();
-      const inside =
-        rect.left >= rootRect.left - 10 &&
-        rect.right <= rootRect.right + 10 &&
-        rect.top >= rootRect.top - 10 &&
-        rect.bottom <= rootRect.bottom + 10;
-
-      if (!inside) return false;
+  searchRoots.forEach(scope => {
+    Array.from(scope.querySelectorAll("button,[role='button'],a")).forEach(btn => {
+      if (buttons.includes(btn)) return;
+      if (!isVisible(btn)) return;
 
       const label = (btn.getAttribute("aria-label") || "").toLowerCase();
       const title = (btn.getAttribute("title") || "").toLowerCase();
-      const text = compactText(btn.innerText || "").toLowerCase();
+      const text = compactText(btn.innerText || btn.textContent || "").toLowerCase();
       const icon = compactText(btn.querySelector("mat-icon")?.innerText || "").toLowerCase();
 
       const disabled =
@@ -510,25 +505,107 @@ function findNextButton(root) {
         btn.getAttribute("aria-disabled") === "true" ||
         btn.classList.contains("mat-button-disabled") ||
         btn.classList.contains("mat-mdc-button-disabled") ||
-        Boolean(btn.closest(".mat-button-disabled,.mat-mdc-button-disabled"));
+        Boolean(btn.closest(".mat-button-disabled,.mat-mdc-button-disabled")) ||
+        btn.getAttribute("tabindex") === "-1";
 
-      if (disabled) return false;
+      if (disabled) return;
 
-      return (
+      const looksNext =
         label.includes("next page") ||
         label === "next" ||
         title.includes("next") ||
         text === "next" ||
         text.includes("next") ||
-        icon.includes("chevron_right") ||
-        icon.includes("keyboard_arrow_right") ||
-        icon === "navigate_next"
-      );
-    })
-    .pop();
+        icon === "chevron_right" ||
+        icon === "keyboard_arrow_right" ||
+        icon === "navigate_next" ||
+        btn.querySelector("svg[data-icon='chevron-right']");
+
+      if (!looksNext) return;
+
+      const rect = btn.getBoundingClientRect();
+      const nearPreview =
+        !root ||
+        rect.top > 100 ||
+        Boolean(btn.closest("mat-paginator,.mat-mdc-paginator,.paginator,.pagination,.cdk-overlay-pane,mat-dialog-container,.mat-mdc-dialog-container"));
+
+      if (!nearPreview) return;
+
+      buttons.push(btn);
+    });
+  });
+
+  return buttons.pop() || null;
 }
 
-async function scanPreview(options = {}) {
+async async function scanPreview(options = {}) {
+  const firstRoot = getPreviewRoot();
+
+  if (!firstRoot) {
+    return {
+      questions: [],
+      reportRows: [],
+      imagesFound: 0,
+      previewChecked: false
+    };
+  }
+
+  const allQuestions = [];
+  const rows = [];
+  const seen = new Set();
+  const pageSignatures = new Set();
+  const maxPages = 100;
+
+  for (let page = 1; page <= maxPages; page++) {
+    const pageRoot = getPreviewRoot() || firstRoot;
+
+    await autoScrollRoot(pageRoot);
+
+    const current = extractQuestions(pageRoot, options);
+    const signature = current.questions.map(q => `${q.qno}:${compactText(q.question).slice(0, 80)}`).join("|");
+
+    current.questions.forEach(q => {
+      const key = questionUniqueKey(q);
+
+      if (!seen.has(key)) {
+        seen.add(key);
+        allQuestions.push(q);
+      }
+    });
+
+    rows.push(...current.reportRows);
+
+    const nextButton = findNextButton(pageRoot);
+    if (!nextButton) break;
+
+    if (pageSignatures.has(signature)) {
+      break;
+    }
+    pageSignatures.add(signature);
+
+    nextButton.click();
+    await sleep(2200);
+
+    const nextRoot = getPreviewRoot() || pageRoot;
+    await autoScrollRoot(nextRoot);
+
+    const nextCurrent = extractQuestions(nextRoot, options);
+    const nextSignature = nextCurrent.questions.map(q => `${q.qno}:${compactText(q.question).slice(0, 80)}`).join("|");
+
+    if (!nextSignature || nextSignature === signature) {
+      break;
+    }
+  }
+
+  allQuestions.sort((a, b) => Number(a.qno) - Number(b.qno));
+
+  return {
+    questions: allQuestions,
+    reportRows: rows,
+    imagesFound: (getPreviewRoot() || firstRoot).querySelectorAll("img").length,
+    previewChecked: true
+  };
+}) {
   const firstRoot = getPreviewRoot();
 
   if (!firstRoot) {
@@ -802,35 +879,48 @@ function clickVisibleButtonByText(textPatterns, root = document) {
   return true;
 }
 
-async function closePreview() {
+async async function closePreview() {
   const root = getPreviewRoot();
-  if (!root) return true;
 
-  const closeSelectors = [
-    "button[aria-label='Close']",
-    "button[aria-label='close']",
-    "button[mat-dialog-close]",
-    ".mat-dialog-close",
-    ".mat-mdc-dialog-close"
-  ];
+  const closeCandidates = [];
 
-  for (const selector of closeSelectors) {
-    const button = Array.from(root.querySelectorAll(selector)).find(isVisible);
-
-    if (button) {
-      button.click();
-      await sleep(1000);
-      return !getPreviewRoot();
-    }
+  if (root) {
+    closeCandidates.push(...Array.from(root.querySelectorAll(
+      "button[aria-label='Close'],button[aria-label='close'],button[mat-dialog-close],.mat-dialog-close,.mat-mdc-dialog-close,button"
+    )));
   }
 
-  if (clickVisibleButtonByText([/^close$/i, /^cancel$/i, /^x$/i], root)) {
-    await sleep(1000);
-    return !getPreviewRoot();
+  closeCandidates.push(...Array.from(document.querySelectorAll(
+    "button[aria-label='Close'],button[aria-label='close'],button[mat-dialog-close],.mat-dialog-close,.mat-mdc-dialog-close"
+  )));
+
+  const ranked = closeCandidates
+    .filter(isVisible)
+    .map(btn => {
+      const text = compactText(`${btn.innerText || ""} ${btn.getAttribute("aria-label") || ""} ${btn.getAttribute("title") || ""}`).toLowerCase();
+      const icon = compactText(btn.querySelector("mat-icon")?.innerText || "").toLowerCase();
+      const rect = btn.getBoundingClientRect();
+
+      let score = 0;
+      if (text === "close" || text.includes("close")) score += 100;
+      if (text === "x" || text === "×") score += 100;
+      if (icon === "close" || icon === "cancel") score += 100;
+      if (rect.top < 180) score += 20;
+      if (rect.left < 250 || rect.right > window.innerWidth - 250) score += 10;
+
+      return { btn, score };
+    })
+    .filter(x => x.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  if (ranked[0]) {
+    ranked[0].btn.click();
+    await sleep(1200);
+    if (!getPreviewRoot()) return true;
   }
 
   document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
-  await sleep(1000);
+  await sleep(1200);
 
   return !getPreviewRoot();
 }
@@ -855,24 +945,54 @@ function getThreeDotButtons() {
     });
 }
 
-async function openEditTest() {
+async async function openEditTest() {
   if (getEditRoot()) return true;
+
+  if (getPreviewRoot()) {
+    await closePreview();
+    await sleep(800);
+  }
 
   const directEdit = Array.from(document.querySelectorAll("button,[role='button'],a"))
     .filter(isVisible)
-    .find(el => /edit\s*test/i.test(compactText(el.innerText || el.getAttribute("aria-label") || "")));
+    .find(el => /edit\s*test/i.test(compactText(el.innerText || el.textContent || el.getAttribute("aria-label") || "")));
 
   if (directEdit) {
     directEdit.click();
-    await sleep(2200);
+    await sleep(2500);
     return Boolean(getEditRoot());
   }
 
-  const menuButtons = getThreeDotButtons();
+  const rowActionButtons = Array.from(document.querySelectorAll("button,[role='button']"))
+    .filter(isVisible)
+    .filter(btn => {
+      const label = (btn.getAttribute("aria-label") || "").toLowerCase();
+      const title = (btn.getAttribute("title") || "").toLowerCase();
+      const text = compactText(btn.innerText || btn.textContent || "").toLowerCase();
+      const icon = compactText(btn.querySelector("mat-icon")?.innerText || "").toLowerCase();
+      const rect = btn.getBoundingClientRect();
 
-  for (let i = 0; i < menuButtons.length; i++) {
-    menuButtons[i].click();
-    await sleep(800);
+      const looksMenu =
+        label.includes("more") ||
+        title.includes("more") ||
+        text === "more_vert" ||
+        icon === "more_vert" ||
+        icon.includes("more_vert") ||
+        text === "⋮";
+
+      const insideTableArea = rect.top > 220 && rect.left > window.innerWidth * 0.55;
+
+      return looksMenu && insideTableArea;
+    })
+    .sort((a, b) => {
+      const ar = a.getBoundingClientRect();
+      const br = b.getBoundingClientRect();
+      return ar.top - br.top;
+    });
+
+  for (const btn of rowActionButtons) {
+    btn.click();
+    await sleep(900);
 
     const menuRoot = Array.from(document.querySelectorAll(".mat-menu-panel,.mat-mdc-menu-panel,[role='menu'],.cdk-overlay-pane"))
       .filter(isVisible)
@@ -884,12 +1004,12 @@ async function openEditTest() {
 
     if (editItem) {
       (editItem.closest("button,[role='menuitem'],a") || editItem).click();
-      await sleep(2400);
+      await sleep(2600);
       return Boolean(getEditRoot());
     }
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
-    await sleep(300);
+    await sleep(400);
   }
 
   return Boolean(getEditRoot());
