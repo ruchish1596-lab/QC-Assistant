@@ -942,7 +942,7 @@ async function openPreviewTest() {
   return Boolean(getPreviewRoot());
 }
 
-async async function openEditTest() {
+async function openEditTest() {
   if (getEditRoot()) return true;
 
   if (getPreviewRoot()) {
@@ -1209,7 +1209,7 @@ function getRequestEmail(options = {}) {
   );
 }
 
-async async function runDev3Flow(options = {}) {
+async function runDev3Flow(options = {}) {
   const rows = [];
   const email = getRequestEmail(options);
 
@@ -1247,89 +1247,6 @@ async async function runDev3Flow(options = {}) {
       check: "Preview Test",
       status: "ERROR",
       details: "Preview Test & Questions could not be opened automatically"
-    }));
-
-    return {
-      questions: [],
-      rows,
-      imagesFound: 0,
-      config: {}
-    };
-  }
-
-  const preview = await scanPreview({ ...options, videoRequired: false });
-  rows.push(...preview.reportRows);
-
-  await closePreview();
-
-  const editOpened = await openEditTest();
-  let config = {
-    allowSubmit: null,
-    totalQuestions: null,
-    duration: null,
-    syllabus: null,
-    videoRequired: false
-  };
-
-  if (editOpened) {
-    const edit = readEditConfig(preview.questions.length);
-    config = edit.config;
-    rows.push(...edit.rows);
-    await closeEditTest();
-  } else {
-    rows.push(reportRow({
-      priority: "Warning",
-      type: "Test",
-      qno: "-",
-      ruleId: "T006",
-      check: "Edit Test",
-      status: "WARNING",
-      details: "Edit Test could not be opened automatically"
-    }));
-  }
-
-  if (config.videoRequired === true) {
-    preview.questions.forEach(q => {
-      if (q.videoSolution === "Missing") {
-        rows.push(reportRow({
-          priority: "Warning",
-          type: "Question",
-          qno: q.qno,
-          ruleId: "W002",
-          check: "Video Solution",
-          status: "WARNING",
-          details: "Video solution missing while video checkbox is ON",
-          adminAnswer: q.adminAnswer,
-          solutionAnswer: q.solutionAnswer,
-          optionsCount: q.optionsCount,
-          videoSolution: q.videoSolution
-        }));
-      }
-    });
-  }
-
-  rows.push(...duplicateRows(preview.questions));
-  sortReportRows(rows);
-
-  return {
-    questions: preview.questions,
-    rows,
-    imagesFound: preview.imagesFound,
-    config
-  };
-}) {
-  const rows = [];
-  const email = getRequestEmail(options);
-
-  if (!isPwLiveEmail(email)) {
-    rows.push(reportRow({
-      priority: "Critical",
-      type: "Test",
-      qno: "-",
-      ruleId: "AUTH001",
-      check: "Email Validation",
-      status: "ERROR",
-      details: "Only @pw.live email is allowed"
     }));
 
     return {
