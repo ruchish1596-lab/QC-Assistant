@@ -1,6 +1,6 @@
-console.log("QC Assistant DEV3.3 Loaded");
+console.log("QC Assistant DEV3.5 Loaded");
 
-const QC_VERSION = "3.0.3-dev3";
+const QC_VERSION = "3.0.5-dev3";
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function cleanText(text = "") {
@@ -825,15 +825,11 @@ function getTestRowActionButtons() {
   return Array.from(document.querySelectorAll("button,[role='button']"))
     .filter(isVisible)
     .filter(btn => {
-      const label = (btn.getAttribute("aria-label") || "").toLowerCase();
-      const title = (btn.getAttribute("title") || "").toLowerCase();
       const text = compactText(btn.innerText || btn.textContent || "").toLowerCase();
       const icon = compactText(btn.querySelector("mat-icon")?.innerText || "").toLowerCase();
       const rect = btn.getBoundingClientRect();
 
       const looksMenu =
-        label.includes("more") ||
-        title.includes("more") ||
         text === "more_vert" ||
         icon === "more_vert" ||
         icon.includes("more_vert") ||
@@ -846,69 +842,55 @@ function getTestRowActionButtons() {
 
 async function clickFirstRowMenuItem(itemRegex) {
   const menuButtons = getTestRowActionButtons();
-  let lastMenuTexts = [];
+  window.__QC_LAST_MENU_TEXTS__ = [];
 
   for (const btn of menuButtons) {
     robustClick(btn);
-    await sleep(1000);
+    await sleep(900);
 
-    const overlays = Array.from(document.querySelectorAll(
-      ".mat-menu-panel,.mat-mdc-menu-panel,[role='menu'],.cdk-overlay-pane"
-    )).filter(isVisible);
+    const panes = Array.from(document.querySelectorAll(".cdk-overlay-pane,.mat-menu-panel,.mat-mdc-menu-panel,[role='menu']"))
+      .filter(el => {
+        const text = compactText(el.innerText || el.textContent || "");
+        return text.includes("Preview Test") || text.includes("Edit Test") || text.includes("Download Questions");
+      });
 
-    const menuRoot = overlays.pop() || document;
+    const pane = panes.pop();
 
-    const menuItems = Array.from(menuRoot.querySelectorAll("button,[role='menuitem'],a,span,div"))
+    if (!pane) {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
+      await sleep(400);
+      continue;
+    }
+
+    window.__QC_LAST_MENU_TEXTS__ = [compactText(pane.innerText || pane.textContent || "")];
+
+    const item = Array.from(pane.querySelectorAll("button,[role='menuitem'],a,div,span"))
       .filter(isVisible)
       .map(el => {
         const clickable = el.closest("button,[role='menuitem'],a") || el;
         const text = compactText(el.innerText || el.textContent || "");
-        return { el, clickable, text };
+        return { clickable, text };
       })
-      .filter(x => x.text && x.text !== "more_vert");
-
-    lastMenuTexts = menuItems.map(x => x.text);
-
-    let item = menuItems.find(x => itemRegex.test(x.text));
-
-    if (!item && /edit/i.test(String(itemRegex))) {
-      item = menuItems.find(x => /edit|update|modify/i.test(x.text));
-    }
-
-    if (!item && /preview/i.test(String(itemRegex))) {
-      item = menuItems.find(x => /preview|view|questions/i.test(x.text));
-    }
+      .filter(x => x.text && x.text !== "more_vert")
+      .find(x => itemRegex.test(x.text));
 
     if (item) {
       robustClick(item.clickable);
-      await sleep(2800);
+      await sleep(3000);
       return true;
     }
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
-    await sleep(500);
+    await sleep(400);
   }
 
-  window.__QC_LAST_MENU_TEXTS__ = lastMenuTexts;
   return false;
 }
 
 async function openPreviewTest() {
   if (getPreviewRoot()) return true;
 
-  const directPreview = Array.from(document.querySelectorAll("button,[role='button'],a"))
-    .filter(isVisible)
-    .find(el => /preview\s*test|preview\s*test\s*&\s*questions|test\s*&\s*questions|view\s*questions/i.test(
-      compactText(el.innerText || el.textContent || el.getAttribute("aria-label") || "")
-    ));
-
-  if (directPreview) {
-    robustClick(directPreview);
-    await sleep(3000);
-    return Boolean(getPreviewRoot());
-  }
-
-  const clicked = await clickFirstRowMenuItem(/preview\s*test|preview\s*test\s*&\s*questions|test\s*&\s*questions|view\s*questions|preview|view/i);
+  const clicked = await clickFirstRowMenuItem(/Preview Test & Questions/i);
 
   if (clicked) {
     await sleep(1500);
@@ -1007,24 +989,57 @@ async function openEditTest() {
     await sleep(1200);
   }
 
-  const directEdit = Array.from(document.querySelectorAll("button,[role='button'],a"))
-    .filter(isVisible)
-    .find(el => /edit\s*test|edit|update/i.test(compactText(el.innerText || el.textContent || el.getAttribute("aria-label") || "")));
-
-  if (directEdit) {
-    robustClick(directEdit);
-    await sleep(3000);
-    return Boolean(getEditRoot());
-  }
-
-  const clicked = await clickFirstRowMenuItem(/edit\s*test|edit|update|modify/i);
+  const clicked = await clickFirstRowMenuItem(/Edit Test/i);
 
   if (clicked) {
-    await sleep(1500);
+    await sleep(1800);
     return Boolean(getEditRoot());
   }
 
   return Boolean(getEditRoot());
+}
+
+async function goToEditStep2() {
+  let root = getEditRoot();
+
+  for (let attempt = 0; attempt < 4; attempt++) {
+    root = getEditRoot() || document;
+    const text = compactText(root.innerText || root.textContent || "").toLowerCase();
+
+    if (
+      text.includes("allow submit") ||
+      text.includes("duration in minutes") ||
+      text.includes("total questions")
+    ) {
+      return true;
+    }
+
+    const saveNextButton = Array.from(document.querySelectorAll("button,[role='button'],a"))
+      .filter(isVisible)
+      .map(el => {
+        const label = compactText([
+          el.innerText || el.textContent || "",
+          el.getAttribute("aria-label") || "",
+          el.getAttribute("title") || ""
+        ].join(" "));
+        return { el, label };
+      })
+      .find(x => /^save\s*&\s*next$/i.test(x.label) || /save\s*&\s*next/i.test(x.label));
+
+    if (!saveNextButton) return false;
+
+    robustClick(saveNextButton.el);
+    await sleep(2500);
+  }
+
+  root = getEditRoot() || document;
+  const finalText = compactText(root.innerText || root.textContent || "").toLowerCase();
+
+  return (
+    finalText.includes("allow submit") ||
+    finalText.includes("duration in minutes") ||
+    finalText.includes("total questions")
+  );
 }
 
 function readEditConfig(scannedCount) {
@@ -1329,6 +1344,20 @@ async function runDev3Flow(options = {}) {
   };
 
   if (editOpened) {
+    const step2Opened = await goToEditStep2();
+
+    if (!step2Opened) {
+      rows.push(reportRow({
+        priority: "Warning",
+        type: "Test",
+        qno: "-",
+        ruleId: "T007",
+        check: "Edit Test Step 2",
+        status: "WARNING",
+        details: "Save & Next / Step 2 could not be opened automatically"
+      }));
+    }
+
     const edit = readEditConfig(preview.questions.length);
     config = edit.config;
     rows.push(...edit.rows);
