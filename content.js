@@ -1,6 +1,6 @@
-console.log("QC Assistant DEV3.1 Loaded");
+console.log("QC Assistant DEV3.2 Loaded");
 
-const QC_VERSION = "3.0.1-dev3";
+const QC_VERSION = "3.0.2-dev3";
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function cleanText(text = "") {
@@ -483,21 +483,26 @@ function questionUniqueKey(q) {
 }
 
 function findNextButton(root) {
-  const searchRoots = [];
+  if (!root) return null;
 
-  if (root) searchRoots.push(root);
-  searchRoots.push(document);
+  const rootRect = root.getBoundingClientRect();
 
-  const buttons = [];
+  return Array.from(root.querySelectorAll("button,[role='button']"))
+    .filter(btn => {
+      if (!isVisible(btn)) return false;
 
-  searchRoots.forEach(scope => {
-    Array.from(scope.querySelectorAll("button,[role='button'],a")).forEach(btn => {
-      if (buttons.includes(btn)) return;
-      if (!isVisible(btn)) return;
+      const rect = btn.getBoundingClientRect();
+      const inside =
+        rect.left >= rootRect.left - 10 &&
+        rect.right <= rootRect.right + 10 &&
+        rect.top >= rootRect.top - 10 &&
+        rect.bottom <= rootRect.bottom + 10;
+
+      if (!inside) return false;
 
       const label = (btn.getAttribute("aria-label") || "").toLowerCase();
       const title = (btn.getAttribute("title") || "").toLowerCase();
-      const text = compactText(btn.innerText || btn.textContent || "").toLowerCase();
+      const text = compactText(btn.innerText || "").toLowerCase();
       const icon = compactText(btn.querySelector("mat-icon")?.innerText || "").toLowerCase();
 
       const disabled =
@@ -505,107 +510,25 @@ function findNextButton(root) {
         btn.getAttribute("aria-disabled") === "true" ||
         btn.classList.contains("mat-button-disabled") ||
         btn.classList.contains("mat-mdc-button-disabled") ||
-        Boolean(btn.closest(".mat-button-disabled,.mat-mdc-button-disabled")) ||
-        btn.getAttribute("tabindex") === "-1";
+        Boolean(btn.closest(".mat-button-disabled,.mat-mdc-button-disabled"));
 
-      if (disabled) return;
+      if (disabled) return false;
 
-      const looksNext =
+      return (
         label.includes("next page") ||
         label === "next" ||
         title.includes("next") ||
         text === "next" ||
         text.includes("next") ||
-        icon === "chevron_right" ||
-        icon === "keyboard_arrow_right" ||
-        icon === "navigate_next" ||
-        btn.querySelector("svg[data-icon='chevron-right']");
-
-      if (!looksNext) return;
-
-      const rect = btn.getBoundingClientRect();
-      const nearPreview =
-        !root ||
-        rect.top > 100 ||
-        Boolean(btn.closest("mat-paginator,.mat-mdc-paginator,.paginator,.pagination,.cdk-overlay-pane,mat-dialog-container,.mat-mdc-dialog-container"));
-
-      if (!nearPreview) return;
-
-      buttons.push(btn);
-    });
-  });
-
-  return buttons.pop() || null;
+        icon.includes("chevron_right") ||
+        icon.includes("keyboard_arrow_right") ||
+        icon === "navigate_next"
+      );
+    })
+    .pop();
 }
 
-async async function scanPreview(options = {}) {
-  const firstRoot = getPreviewRoot();
-
-  if (!firstRoot) {
-    return {
-      questions: [],
-      reportRows: [],
-      imagesFound: 0,
-      previewChecked: false
-    };
-  }
-
-  const allQuestions = [];
-  const rows = [];
-  const seen = new Set();
-  const pageSignatures = new Set();
-  const maxPages = 100;
-
-  for (let page = 1; page <= maxPages; page++) {
-    const pageRoot = getPreviewRoot() || firstRoot;
-
-    await autoScrollRoot(pageRoot);
-
-    const current = extractQuestions(pageRoot, options);
-    const signature = current.questions.map(q => `${q.qno}:${compactText(q.question).slice(0, 80)}`).join("|");
-
-    current.questions.forEach(q => {
-      const key = questionUniqueKey(q);
-
-      if (!seen.has(key)) {
-        seen.add(key);
-        allQuestions.push(q);
-      }
-    });
-
-    rows.push(...current.reportRows);
-
-    const nextButton = findNextButton(pageRoot);
-    if (!nextButton) break;
-
-    if (pageSignatures.has(signature)) {
-      break;
-    }
-    pageSignatures.add(signature);
-
-    nextButton.click();
-    await sleep(2200);
-
-    const nextRoot = getPreviewRoot() || pageRoot;
-    await autoScrollRoot(nextRoot);
-
-    const nextCurrent = extractQuestions(nextRoot, options);
-    const nextSignature = nextCurrent.questions.map(q => `${q.qno}:${compactText(q.question).slice(0, 80)}`).join("|");
-
-    if (!nextSignature || nextSignature === signature) {
-      break;
-    }
-  }
-
-  allQuestions.sort((a, b) => Number(a.qno) - Number(b.qno));
-
-  return {
-    questions: allQuestions,
-    reportRows: rows,
-    imagesFound: (getPreviewRoot() || firstRoot).querySelectorAll("img").length,
-    previewChecked: true
-  };
-}) {
+async function scanPreview(options = {}) {
   const firstRoot = getPreviewRoot();
 
   if (!firstRoot) {
@@ -879,48 +802,35 @@ function clickVisibleButtonByText(textPatterns, root = document) {
   return true;
 }
 
-async async function closePreview() {
+async function closePreview() {
   const root = getPreviewRoot();
+  if (!root) return true;
 
-  const closeCandidates = [];
+  const closeSelectors = [
+    "button[aria-label='Close']",
+    "button[aria-label='close']",
+    "button[mat-dialog-close]",
+    ".mat-dialog-close",
+    ".mat-mdc-dialog-close"
+  ];
 
-  if (root) {
-    closeCandidates.push(...Array.from(root.querySelectorAll(
-      "button[aria-label='Close'],button[aria-label='close'],button[mat-dialog-close],.mat-dialog-close,.mat-mdc-dialog-close,button"
-    )));
+  for (const selector of closeSelectors) {
+    const button = Array.from(root.querySelectorAll(selector)).find(isVisible);
+
+    if (button) {
+      button.click();
+      await sleep(1000);
+      return !getPreviewRoot();
+    }
   }
 
-  closeCandidates.push(...Array.from(document.querySelectorAll(
-    "button[aria-label='Close'],button[aria-label='close'],button[mat-dialog-close],.mat-dialog-close,.mat-mdc-dialog-close"
-  )));
-
-  const ranked = closeCandidates
-    .filter(isVisible)
-    .map(btn => {
-      const text = compactText(`${btn.innerText || ""} ${btn.getAttribute("aria-label") || ""} ${btn.getAttribute("title") || ""}`).toLowerCase();
-      const icon = compactText(btn.querySelector("mat-icon")?.innerText || "").toLowerCase();
-      const rect = btn.getBoundingClientRect();
-
-      let score = 0;
-      if (text === "close" || text.includes("close")) score += 100;
-      if (text === "x" || text === "×") score += 100;
-      if (icon === "close" || icon === "cancel") score += 100;
-      if (rect.top < 180) score += 20;
-      if (rect.left < 250 || rect.right > window.innerWidth - 250) score += 10;
-
-      return { btn, score };
-    })
-    .filter(x => x.score > 0)
-    .sort((a, b) => b.score - a.score);
-
-  if (ranked[0]) {
-    ranked[0].btn.click();
-    await sleep(1200);
-    if (!getPreviewRoot()) return true;
+  if (clickVisibleButtonByText([/^close$/i, /^cancel$/i, /^x$/i], root)) {
+    await sleep(1000);
+    return !getPreviewRoot();
   }
 
   document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
-  await sleep(1200);
+  await sleep(1000);
 
   return !getPreviewRoot();
 }
@@ -945,25 +855,8 @@ function getThreeDotButtons() {
     });
 }
 
-async async function openEditTest() {
-  if (getEditRoot()) return true;
-
-  if (getPreviewRoot()) {
-    await closePreview();
-    await sleep(800);
-  }
-
-  const directEdit = Array.from(document.querySelectorAll("button,[role='button'],a"))
-    .filter(isVisible)
-    .find(el => /edit\s*test/i.test(compactText(el.innerText || el.textContent || el.getAttribute("aria-label") || "")));
-
-  if (directEdit) {
-    directEdit.click();
-    await sleep(2500);
-    return Boolean(getEditRoot());
-  }
-
-  const rowActionButtons = Array.from(document.querySelectorAll("button,[role='button']"))
+function getTestRowActionButtons() {
+  return Array.from(document.querySelectorAll("button,[role='button']"))
     .filter(isVisible)
     .filter(btn => {
       const label = (btn.getAttribute("aria-label") || "").toLowerCase();
@@ -980,36 +873,98 @@ async async function openEditTest() {
         icon.includes("more_vert") ||
         text === "⋮";
 
-      const insideTableArea = rect.top > 220 && rect.left > window.innerWidth * 0.55;
+      const tableArea =
+        rect.top > 250 &&
+        rect.left > window.innerWidth * 0.55;
 
-      return looksMenu && insideTableArea;
+      return looksMenu && tableArea;
     })
     .sort((a, b) => {
       const ar = a.getBoundingClientRect();
       const br = b.getBoundingClientRect();
       return ar.top - br.top;
     });
+}
 
-  for (const btn of rowActionButtons) {
+async function clickFirstRowMenuItem(itemRegex) {
+  const menuButtons = getTestRowActionButtons();
+
+  for (const btn of menuButtons) {
     btn.click();
     await sleep(900);
 
-    const menuRoot = Array.from(document.querySelectorAll(".mat-menu-panel,.mat-mdc-menu-panel,[role='menu'],.cdk-overlay-pane"))
-      .filter(isVisible)
-      .pop() || document;
+    const overlays = Array.from(document.querySelectorAll(
+      ".mat-menu-panel,.mat-mdc-menu-panel,[role='menu'],.cdk-overlay-pane"
+    )).filter(isVisible);
 
-    const editItem = Array.from(menuRoot.querySelectorAll("button,[role='menuitem'],a,span,div"))
-      .filter(isVisible)
-      .find(el => /edit\s*test/i.test(compactText(el.innerText || el.textContent || "")));
+    const menuRoot = overlays.pop() || document;
 
-    if (editItem) {
-      (editItem.closest("button,[role='menuitem'],a") || editItem).click();
+    const menuItems = Array.from(menuRoot.querySelectorAll("button,[role='menuitem'],a,span,div"))
+      .filter(isVisible);
+
+    const item = menuItems.find(el => itemRegex.test(compactText(el.innerText || el.textContent || "")));
+
+    if (item) {
+      (item.closest("button,[role='menuitem'],a") || item).click();
       await sleep(2600);
-      return Boolean(getEditRoot());
+      return true;
     }
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
     await sleep(400);
+  }
+
+  return false;
+}
+
+async function openPreviewTest() {
+  if (getPreviewRoot()) return true;
+
+  const directPreview = Array.from(document.querySelectorAll("button,[role='button'],a"))
+    .filter(isVisible)
+    .find(el => /preview\s*test|preview\s*test\s*&\s*questions|test\s*&\s*questions/i.test(
+      compactText(el.innerText || el.textContent || el.getAttribute("aria-label") || "")
+    ));
+
+  if (directPreview) {
+    directPreview.click();
+    await sleep(2800);
+    return Boolean(getPreviewRoot());
+  }
+
+  const clicked = await clickFirstRowMenuItem(/preview\s*test|preview\s*test\s*&\s*questions|test\s*&\s*questions/i);
+
+  if (clicked) {
+    await sleep(1200);
+    return Boolean(getPreviewRoot());
+  }
+
+  return Boolean(getPreviewRoot());
+}
+
+async async function openEditTest() {
+  if (getEditRoot()) return true;
+
+  if (getPreviewRoot()) {
+    await closePreview();
+    await sleep(1000);
+  }
+
+  const directEdit = Array.from(document.querySelectorAll("button,[role='button'],a"))
+    .filter(isVisible)
+    .find(el => /edit\s*test/i.test(compactText(el.innerText || el.textContent || el.getAttribute("aria-label") || "")));
+
+  if (directEdit) {
+    directEdit.click();
+    await sleep(2800);
+    return Boolean(getEditRoot());
+  }
+
+  const clicked = await clickFirstRowMenuItem(/edit\s*test/i);
+
+  if (clicked) {
+    await sleep(1200);
+    return Boolean(getEditRoot());
   }
 
   return Boolean(getEditRoot());
@@ -1254,7 +1209,115 @@ function getRequestEmail(options = {}) {
   );
 }
 
-async function runDev3Flow(options = {}) {
+async async function runDev3Flow(options = {}) {
+  const rows = [];
+  const email = getRequestEmail(options);
+
+  if (!isPwLiveEmail(email)) {
+    rows.push(reportRow({
+      priority: "Critical",
+      type: "Test",
+      qno: "-",
+      ruleId: "AUTH001",
+      check: "Email Validation",
+      status: "ERROR",
+      details: "Only @pw.live email is allowed"
+    }));
+
+    return {
+      questions: [],
+      rows,
+      imagesFound: 0,
+      config: {}
+    };
+  }
+
+  let previewOpened = Boolean(getPreviewRoot());
+
+  if (!previewOpened) {
+    previewOpened = await openPreviewTest();
+  }
+
+  if (!previewOpened) {
+    rows.push(reportRow({
+      priority: "Critical",
+      type: "Test",
+      qno: "-",
+      ruleId: "T000",
+      check: "Preview Test",
+      status: "ERROR",
+      details: "Preview Test & Questions could not be opened automatically"
+    }));
+
+    return {
+      questions: [],
+      rows,
+      imagesFound: 0,
+      config: {}
+    };
+  }
+
+  const preview = await scanPreview({ ...options, videoRequired: false });
+  rows.push(...preview.reportRows);
+
+  await closePreview();
+
+  const editOpened = await openEditTest();
+  let config = {
+    allowSubmit: null,
+    totalQuestions: null,
+    duration: null,
+    syllabus: null,
+    videoRequired: false
+  };
+
+  if (editOpened) {
+    const edit = readEditConfig(preview.questions.length);
+    config = edit.config;
+    rows.push(...edit.rows);
+    await closeEditTest();
+  } else {
+    rows.push(reportRow({
+      priority: "Warning",
+      type: "Test",
+      qno: "-",
+      ruleId: "T006",
+      check: "Edit Test",
+      status: "WARNING",
+      details: "Edit Test could not be opened automatically"
+    }));
+  }
+
+  if (config.videoRequired === true) {
+    preview.questions.forEach(q => {
+      if (q.videoSolution === "Missing") {
+        rows.push(reportRow({
+          priority: "Warning",
+          type: "Question",
+          qno: q.qno,
+          ruleId: "W002",
+          check: "Video Solution",
+          status: "WARNING",
+          details: "Video solution missing while video checkbox is ON",
+          adminAnswer: q.adminAnswer,
+          solutionAnswer: q.solutionAnswer,
+          optionsCount: q.optionsCount,
+          videoSolution: q.videoSolution
+        }));
+      }
+    });
+  }
+
+  rows.push(...duplicateRows(preview.questions));
+  sortReportRows(rows);
+
+  return {
+    questions: preview.questions,
+    rows,
+    imagesFound: preview.imagesFound,
+    config
+  };
+}) {
   const rows = [];
   const email = getRequestEmail(options);
 
