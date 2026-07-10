@@ -562,6 +562,7 @@ function findNextButton(root) {
 }
 
 
+
 async function scanPreview(options = {}) {
   const firstRoot = getPreviewRoot();
 
@@ -570,15 +571,20 @@ async function scanPreview(options = {}) {
       questions: [],
       reportRows: [],
       imagesFound: 0,
-      previewChecked: false
+      previewChecked: false,
+      instructionsText: ""
     };
   }
 
   const allQuestions = [];
   const rows = [];
   const seenQuestionKeys = new Set();
-  const seenPageSignatures = new Set();
+  const seenPageStates = new Set();
   const maxPages = 100;
+
+  const instructionsText = cleanText(
+    firstRoot.innerText || firstRoot.textContent || ""
+  );
 
   for (let page = 1; page <= maxPages; page++) {
     const pageRoot = getPreviewRoot() || firstRoot;
@@ -586,13 +592,6 @@ async function scanPreview(options = {}) {
     await autoScrollRoot(pageRoot);
 
     const current = extractQuestions(pageRoot, options);
-
-    const signature = current.questions
-      .map(q => `${q.qno}:${compactText(q.question).slice(0, 120)}`)
-      .join("|");
-
-    if (signature && seenPageSignatures.has(signature)) break;
-    if (signature) seenPageSignatures.add(signature);
 
     current.questions.forEach(q => {
       const key = questionUniqueKey(q);
@@ -605,18 +604,13 @@ async function scanPreview(options = {}) {
 
     rows.push(...current.reportRows);
 
-    const previewDialog =
-      pageRoot.closest?.(
-        "mat-dialog-container,.mat-mdc-dialog-container,.cdk-overlay-pane,[role='dialog']"
-      ) || pageRoot;
+    const rootRect = pageRoot.getBoundingClientRect();
 
     const nextButton = Array.from(
-      previewDialog.querySelectorAll(
-        "button[aria-label='Next page']"
-      )
+      document.querySelectorAll("button[aria-label='Next page']")
     )
       .filter(isVisible)
-      .find(btn => {
+      .filter(btn => {
         const disabled =
           btn.disabled ||
           btn.getAttribute("disabled") !== null ||
@@ -629,26 +623,67 @@ async function scanPreview(options = {}) {
             )
           );
 
-        return !disabled;
-      });
+        if (disabled) return false;
+
+        const rect = btn.getBoundingClientRect();
+        const centreX = rect.left + rect.width / 2;
+        const centreY = rect.top + rect.height / 2;
+
+        return (
+          centreX >= rootRect.left &&
+          centreX <= rootRect.right &&
+          centreY >= rootRect.top &&
+          centreY <= rootRect.bottom
+        );
+      })
+      .find(Boolean);
 
     if (!nextButton) break;
 
-    robustClick(nextButton);
+    const paginator =
+      nextButton.closest(
+        "mat-paginator,.mat-mdc-paginator,.mat-paginator,[class*='paginator']"
+      ) || nextButton.parentElement?.parentElement;
+
+    const beforeRange = compactText(
+      paginator?.innerText || paginator?.textContent || ""
+    );
+
+    const pageState = `${beforeRange}|${current.questions
+      .map(q => q.qno)
+      .join(",")}`;
+
+    if (seenPageStates.has(pageState)) break;
+    seenPageStates.add(pageState);
+
+    nextButton.click();
 
     let pageChanged = false;
 
-    for (let attempt = 0; attempt < 14; attempt++) {
+    for (let attempt = 0; attempt < 16; attempt++) {
       await sleep(500);
+
+      const afterRange = compactText(
+        paginator?.innerText || paginator?.textContent || ""
+      );
+
+      if (afterRange && afterRange !== beforeRange) {
+        pageChanged = true;
+        break;
+      }
 
       const afterRoot = getPreviewRoot() || pageRoot;
       const afterCurrent = extractQuestions(afterRoot, options);
 
-      const afterSignature = afterCurrent.questions
-        .map(q => `${q.qno}:${compactText(q.question).slice(0, 120)}`)
+      const beforeSignature = current.questions
+        .map(q => `${q.qno}:${compactText(q.question).slice(0, 100)}`)
         .join("|");
 
-      if (afterSignature && afterSignature !== signature) {
+      const afterSignature = afterCurrent.questions
+        .map(q => `${q.qno}:${compactText(q.question).slice(0, 100)}`)
+        .join("|");
+
+      if (afterSignature && afterSignature !== beforeSignature) {
         pageChanged = true;
         break;
       }
@@ -662,9 +697,9 @@ async function scanPreview(options = {}) {
   return {
     questions: allQuestions,
     reportRows: rows,
-    imagesFound: (getPreviewRoot() || firstRoot)
-      .querySelectorAll("img").length,
-    previewChecked: true
+    imagesFound: firstRoot.querySelectorAll("img").length,
+    previewChecked: true,
+    instructionsText
   };
 }
 
