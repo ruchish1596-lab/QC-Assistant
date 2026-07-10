@@ -1,6 +1,6 @@
-console.log("QC Assistant DEV3.3 Exact Test Name Fix Loaded");
+console.log("QC Assistant DEV3.3 TD Exact Row Fix Loaded");
 
-const QC_VERSION = "3.0.3-dev3-exact-test-name-fix";
+const QC_VERSION = "3.0.3-dev3-td-exact-row-fix";
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function cleanText(text = "") {
@@ -1325,23 +1325,48 @@ function getTargetTestActionButton() {
     window.__QC_MANUAL_TEST_NAME__ || ""
   );
 
-  const targetName = normalizeTestTitle(rawManualName);
+  const rawPreviewName = compactText(
+    window.__QC_TARGET_TEST_TITLE__ || ""
+  );
+
+  const targetName = normalizeTestTitle(
+    rawManualName || rawPreviewName
+  );
 
   if (!targetName) {
     window.__QC_EDIT_ERROR__ =
-      "Manual Test Name is required to open Edit Test safely";
+      "Test name not available for exact row matching";
     return null;
   }
 
-  const rows = Array.from(
+  const cells = Array.from(
     document.querySelectorAll(
-      "tr, mat-row, .mat-row, .mat-mdc-row, [role='row']"
+      "td, mat-cell, .mat-cell, .mat-mdc-cell, [role='cell']"
     )
   ).filter(isVisible);
 
-  const exactMatches = [];
+  const exactNameCells = cells.filter(cell => {
+    const cellText = normalizeTestTitle(
+      cell.innerText || cell.textContent || ""
+    );
 
-  rows.forEach(row => {
+    return cellText === targetName;
+  });
+
+  if (exactNameCells.length === 0) {
+    window.__QC_EDIT_ERROR__ =
+      `Exact test name cell not found for: ${rawManualName || rawPreviewName}`;
+    return null;
+  }
+
+  // Prefer the NAME column occurrence whose row also contains a more_vert action button.
+  for (const cell of exactNameCells) {
+    const row = cell.closest(
+      "tr, mat-row, .mat-row, .mat-mdc-row, [role='row']"
+    );
+
+    if (!row) continue;
+
     const actionButton = Array.from(
       row.querySelectorAll("button,[role='button']")
     ).find(btn => {
@@ -1356,46 +1381,15 @@ function getTargetTestActionButton() {
       return text === "more_vert" || icon === "more_vert";
     });
 
-    if (!actionButton) return;
-
-    const cells = Array.from(
-      row.querySelectorAll(
-        "td, mat-cell, .mat-cell, .mat-mdc-cell, [role='cell']"
-      )
-    ).filter(isVisible);
-
-    const exactCell = cells.find(cell => {
-      const cellText = normalizeTestTitle(
-        cell.innerText || cell.textContent || ""
-      );
-
-      return cellText === targetName;
-    });
-
-    if (exactCell) {
-      exactMatches.push({
-        button: actionButton,
-        row,
-        cellText: compactText(
-          exactCell.innerText || exactCell.textContent || ""
-        )
-      });
+    if (actionButton) {
+      return actionButton;
     }
-  });
-
-  if (exactMatches.length === 0) {
-    window.__QC_EDIT_ERROR__ =
-      `Exact test row not found for: ${rawManualName}`;
-    return null;
   }
 
-  if (exactMatches.length > 1) {
-    window.__QC_EDIT_ERROR__ =
-      `Multiple exact test rows found for: ${rawManualName}`;
-    return null;
-  }
+  window.__QC_EDIT_ERROR__ =
+    `Exact test row found, but action button missing for: ${rawManualName || rawPreviewName}`;
 
-  return exactMatches[0].button;
+  return null;
 }
 
 async function closePreview() {
