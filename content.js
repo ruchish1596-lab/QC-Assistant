@@ -1,6 +1,6 @@
-console.log("QC Assistant DEV3.3 TD Exact Row Fix Loaded");
+console.log("QC Assistant DEV3.3 Preview Paginator Only Fix Loaded");
 
-const QC_VERSION = "3.0.3-dev3-td-exact-row-fix";
+const QC_VERSION = "3.0.3-dev3-preview-paginator-only-fix";
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function cleanText(text = "") {
@@ -561,6 +561,7 @@ function findNextButton(root) {
   return candidates[0]?.btn || null;
 }
 
+
 async function scanPreview(options = {}) {
   const firstRoot = getPreviewRoot();
 
@@ -569,8 +570,7 @@ async function scanPreview(options = {}) {
       questions: [],
       reportRows: [],
       imagesFound: 0,
-      previewChecked: false,
-      instructionsText: ""
+      previewChecked: false
     };
   }
 
@@ -579,11 +579,6 @@ async function scanPreview(options = {}) {
   const seenQuestionKeys = new Set();
   const seenPageSignatures = new Set();
   const maxPages = 100;
-
-  // Save Preview/General Instructions text before closing the modal.
-  const instructionsText = cleanText(
-    firstRoot.innerText || firstRoot.textContent || ""
-  );
 
   for (let page = 1; page <= maxPages; page++) {
     const pageRoot = getPreviewRoot() || firstRoot;
@@ -601,6 +596,7 @@ async function scanPreview(options = {}) {
 
     current.questions.forEach(q => {
       const key = questionUniqueKey(q);
+
       if (!seenQuestionKeys.has(key)) {
         seenQuestionKeys.add(key);
         allQuestions.push(q);
@@ -609,22 +605,32 @@ async function scanPreview(options = {}) {
 
     rows.push(...current.reportRows);
 
-    const nextButtons = Array.from(
-      document.querySelectorAll("button[aria-label='Next page']")
+    const previewDialog =
+      pageRoot.closest?.(
+        "mat-dialog-container,.mat-mdc-dialog-container,.cdk-overlay-pane,[role='dialog']"
+      ) || pageRoot;
+
+    const nextButton = Array.from(
+      previewDialog.querySelectorAll(
+        "button[aria-label='Next page']"
+      )
     )
       .filter(isVisible)
-      .filter(btn => {
-        return !(
+      .find(btn => {
+        const disabled =
           btn.disabled ||
           btn.getAttribute("disabled") !== null ||
           btn.getAttribute("aria-disabled") === "true" ||
           btn.classList.contains("mat-button-disabled") ||
-          btn.classList.contains("mat-mdc-button-disabled")
-        );
-      });
+          btn.classList.contains("mat-mdc-button-disabled") ||
+          Boolean(
+            btn.closest(
+              ".mat-button-disabled,.mat-mdc-button-disabled"
+            )
+          );
 
-    // Background paginator appears first; Preview paginator appears last.
-    const nextButton = nextButtons[nextButtons.length - 1];
+        return !disabled;
+      });
 
     if (!nextButton) break;
 
@@ -656,9 +662,9 @@ async function scanPreview(options = {}) {
   return {
     questions: allQuestions,
     reportRows: rows,
-    imagesFound: firstRoot.querySelectorAll("img").length,
-    previewChecked: true,
-    instructionsText
+    imagesFound: (getPreviewRoot() || firstRoot)
+      .querySelectorAll("img").length,
+    previewChecked: true
   };
 }
 
