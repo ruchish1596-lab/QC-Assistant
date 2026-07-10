@@ -232,75 +232,6 @@ async function autoScrollRoot(root) {
   await sleep(300);
 }
 
-
-async function waitForPreviewStable(root, timeout = 8000) {
-  const started = Date.now();
-  let last = "";
-  let stable = 0;
-
-  while (Date.now() - started < timeout) {
-    const titles = Array.from(root.querySelectorAll("mat-card-title")).filter(isVisible);
-    const contents = Array.from(root.querySelectorAll("mat-card-content"));
-    const signature = `${titles.length}|${contents.length}|${root.scrollHeight}|${compactText(root.innerText || "").length}`;
-
-    if (signature === last && titles.length > 0 && contents.length >= titles.length) {
-      stable++;
-      if (stable >= 3) return true;
-    } else {
-      last = signature;
-      stable = 0;
-    }
-
-    await sleep(350);
-  }
-
-  return false;
-}
-
-async function waitForQuestionContent(root, timeout = 5000) {
-  const started = Date.now();
-
-  while (Date.now() - started < timeout) {
-    const titles = Array.from(root.querySelectorAll("mat-card-title")).filter(isVisible);
-    const contents = Array.from(root.querySelectorAll("mat-card-content"));
-
-    if (titles.length > 0 && contents.length >= titles.length) {
-      const ready = contents.every((content, index) => {
-        if (!titles[index]) return true;
-        const value = compactText(content.innerText || content.textContent || "");
-        return value.length > 0 || Boolean(content.querySelector("img"));
-      });
-
-      if (ready) return true;
-    }
-
-    await sleep(300);
-  }
-
-  return false;
-}
-
-async function waitForMenuOpen(timeout = 4000) {
-  const started = Date.now();
-
-  while (Date.now() - started < timeout) {
-    const pane = Array.from(document.querySelectorAll(
-      ".cdk-overlay-pane,.mat-menu-panel,.mat-mdc-menu-panel,[role='menu']"
-    ))
-      .filter(isVisible)
-      .find(el => {
-        const value = compactText(el.innerText || el.textContent || "");
-        return value.includes("Preview Test & Questions") &&
-          value.includes("Edit Test");
-      });
-
-    if (pane) return pane;
-    await sleep(250);
-  }
-
-  return null;
-}
-
 function getOptionLetter(text = "") {
   const match = compactText(text).match(/^([A-D])[\.)]\s*/i);
   return match ? match[1].toUpperCase() : "";
@@ -632,7 +563,6 @@ function findNextButton(root) {
 
 
 
-
 async function scanPreview(options = {}) {
   const firstRoot = getPreviewRoot();
 
@@ -649,7 +579,7 @@ async function scanPreview(options = {}) {
   const allQuestions = [];
   const rows = [];
   const seenQuestionKeys = new Set();
-  const seenPageSignatures = new Set();
+  const seenPageStates = new Set();
   const maxPages = 100;
 
   const instructionsText = cleanText(
@@ -659,24 +589,9 @@ async function scanPreview(options = {}) {
   for (let page = 1; page <= maxPages; page++) {
     const pageRoot = getPreviewRoot() || firstRoot;
 
-    await waitForPreviewStable(pageRoot);
     await autoScrollRoot(pageRoot);
-    await waitForQuestionContent(pageRoot);
 
-    let current = extractQuestions(pageRoot, options);
-
-    if (current.questions.some(q => q.optionsCount === 0 || q.adminAnswer === "-")) {
-      await sleep(900);
-      await waitForQuestionContent(pageRoot, 4000);
-      current = extractQuestions(pageRoot, options);
-    }
-
-    const pageSignature = current.questions
-      .map(q => `${q.qno}:${compactText(q.question).slice(0, 120)}`)
-      .join("|");
-
-    if (pageSignature && seenPageSignatures.has(pageSignature)) break;
-    if (pageSignature) seenPageSignatures.add(pageSignature);
+    const current = extractQuestions(pageRoot, options);
 
     current.questions.forEach(q => {
       const key = questionUniqueKey(q);
@@ -689,42 +604,115 @@ async function scanPreview(options = {}) {
 
     rows.push(...current.reportRows);
 
-    const nextButton = Array.from(pageRoot.querySelectorAll(
-      "button[aria-label='Next page'],button.mat-paginator-navigation-next"
-    ))
+    const nextButton = Array.from(
+      pageRoot.querySelectorAll(
+        "button[aria-label='Next page'], button.mat-paginator-navigation-next"
+      )
+    )
       .filter(isVisible)
-      .find(btn => !(
-        btn.disabled ||
-        btn.getAttribute("disabled") !== null ||
-        btn.getAttribute("aria-disabled") === "true" ||
-        btn.classList.contains("mat-button-disabled") ||
-        btn.classList.contains("mat-mdc-button-disabled")
-      ));
+      .find(btn => {
+        const disabled =
+          btn.disabled ||
+          btn.getAttribute("disabled") !== null ||
+          btn.getAttribute("aria-disabled") === "true" ||
+          btn.classList.contains("mat-button-disabled") ||
+          btn.classList.contains("mat-mdc-button-disabled") ||
+          Boolean(
+            btn.closest(
+              ".mat-button-disabled,.mat-mdc-button-disabled"
+            )
+          );
+
+        return !disabled;
+      });
 
     if (!nextButton) break;
 
-    nextButton.click();
+    const paginator =
+      nextButton.closest(
+        "mat-paginator,.mat-mdc-paginator,.mat-paginator,[class*='paginator']"
+      ) || nextButton.parentElement?.parentElement;
 
-    let changed = false;
+    const beforeRange = compactText(
+      paginator?.innerText || paginator?.textContent || ""
+    );
 
-    for (let attempt = 0; attempt < 20; attempt++) {
-      await sleep(400);
+    const pageState = `${beforeRange}|${current.questions
+      .map(q => q.qno)
+      .join(",")}`;
+
+    if (seenPageStates.has(pageState)) break;
+    seenPageStates.add(pageState);
+
+    try {
+      nextButton.scrollIntoView({
+        block: "center",
+        inline: "nearest"
+      });
+    } catch {}
+
+    await sleep(300);
+
+    try {
+      nextButton.focus();
+    } catch {}
+
+    nextButton.dispatchEvent(
+      new MouseEvent("mousedown", {
+        bubbles: true,
+        cancelable: true,
+        view: window
+      })
+    );
+
+    nextButton.dispatchEvent(
+      new MouseEvent("mouseup", {
+        bubbles: true,
+        cancelable: true,
+        view: window
+      })
+    );
+
+    nextButton.dispatchEvent(
+      new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        view: window
+      })
+    );
+
+    let pageChanged = false;
+
+    for (let attempt = 0; attempt < 16; attempt++) {
+      await sleep(500);
+
+      const afterRange = compactText(
+        paginator?.innerText || paginator?.textContent || ""
+      );
+
+      if (afterRange && afterRange !== beforeRange) {
+        pageChanged = true;
+        break;
+      }
 
       const afterRoot = getPreviewRoot() || pageRoot;
-      await waitForPreviewStable(afterRoot, 2500);
+      const afterCurrent = extractQuestions(afterRoot, options);
 
-      const after = extractQuestions(afterRoot, options);
-      const afterSignature = after.questions
-        .map(q => `${q.qno}:${compactText(q.question).slice(0, 120)}`)
+      const beforeSignature = current.questions
+        .map(q => `${q.qno}:${compactText(q.question).slice(0, 100)}`)
         .join("|");
 
-      if (afterSignature && afterSignature !== pageSignature) {
-        changed = true;
+      const afterSignature = afterCurrent.questions
+        .map(q => `${q.qno}:${compactText(q.question).slice(0, 100)}`)
+        .join("|");
+
+      if (afterSignature && afterSignature !== beforeSignature) {
+        pageChanged = true;
         break;
       }
     }
 
-    if (!changed) break;
+    if (!pageChanged) break;
   }
 
   allQuestions.sort((a, b) => Number(a.qno) - Number(b.qno));
@@ -1554,7 +1542,6 @@ function getThreeDotButtons() {
     });
 }
 
-
 async function openEditTest() {
   if (getPreviewRoot()) {
     await closePreview();
@@ -1571,21 +1558,39 @@ async function openEditTest() {
   }
 
   try {
-    targetButton.scrollIntoView({ block: "center", inline: "nearest" });
+    targetButton.scrollIntoView({
+      block: "center",
+      inline: "nearest"
+    });
   } catch {}
 
   await sleep(400);
 
-  let menuPane = null;
+  try {
+    targetButton.focus();
+  } catch {}
 
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try { targetButton.focus(); } catch {}
-    targetButton.click();
-    menuPane = await waitForMenuOpen(3500);
+  // Single click only. Multiple synthetic clicks were opening
+  // and immediately closing the Angular Material menu.
+  targetButton.click();
+  await sleep(1200);
 
-    if (menuPane) break;
-    await sleep(500);
-  }
+  const menuPane = Array.from(
+    document.querySelectorAll(
+      ".cdk-overlay-pane,.mat-menu-panel,.mat-mdc-menu-panel,[role='menu']"
+    )
+  )
+    .filter(isVisible)
+    .find(el => {
+      const menuText = compactText(
+        el.innerText || el.textContent || ""
+      );
+
+      return (
+        menuText.includes("Preview Test & Questions") &&
+        menuText.includes("Edit Test")
+      );
+    });
 
   if (!menuPane) {
     window.__QC_LAST_MENU_TEXTS__ = [
@@ -1598,13 +1603,20 @@ async function openEditTest() {
     return false;
   }
 
-  const editItem = Array.from(menuPane.querySelectorAll(
-    "button,[role='menuitem'],a"
-  ))
+  const editItem = Array.from(
+    menuPane.querySelectorAll(
+      "button,[role='menuitem'],a"
+    )
+  )
     .filter(isVisible)
-    .find(el => /edit\s*test/i.test(
-      compactText(el.innerText || el.textContent || "")
-    ));
+    .find(el => {
+      const itemText = compactText(
+        el.innerText || el.textContent || ""
+      );
+
+      return /^edit\s*test$/i.test(itemText) ||
+        /edit\s*test/i.test(itemText);
+    });
 
   if (!editItem) {
     window.__QC_LAST_MENU_TEXTS__ = [
@@ -1613,52 +1625,29 @@ async function openEditTest() {
     return false;
   }
 
+  // Single native click here as well.
   editItem.click();
+  await sleep(2800);
 
-  let opened = false;
-
-  for (let attempt = 0; attempt < 16; attempt++) {
-    await sleep(400);
-
-    if (getEditRoot()) {
-      opened = true;
-      break;
-    }
-  }
-
-  if (!opened) return false;
-
-  const saveNextButton = Array.from(document.querySelectorAll(
-    "button,[role='button'],a"
-  ))
+  const saveNextButton = Array.from(
+    document.querySelectorAll(
+      "button,[role='button'],a"
+    )
+  )
     .filter(isVisible)
-    .find(el => /save\s*&\s*next/i.test(
-      compactText(
+    .find(el => {
+      const buttonText = compactText(
         `${el.innerText || el.textContent || ""} ${
           el.getAttribute("aria-label") || ""
         }`
-      )
-    ));
+      );
+
+      return /save\s*&\s*next/i.test(buttonText);
+    });
 
   if (saveNextButton) {
     saveNextButton.click();
-
-    for (let attempt = 0; attempt < 16; attempt++) {
-      await sleep(350);
-
-      const root = getEditRoot();
-      const value = compactText(
-        root?.innerText || root?.textContent || ""
-      ).toLowerCase();
-
-      if (
-        value.includes("allow submit") ||
-        value.includes("duration in minutes") ||
-        value.includes("total questions")
-      ) {
-        break;
-      }
-    }
+    await sleep(2800);
   }
 
   return Boolean(getEditRoot());
