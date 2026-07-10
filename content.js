@@ -1,6 +1,6 @@
-console.log("QC Assistant DEV3.3 Preview Paginator Only Fix Loaded");
+console.log("QC Assistant DEV3.3 Test Name Suffix Fix Loaded");
 
-const QC_VERSION = "3.0.3-dev3-preview-paginator-only-fix";
+const QC_VERSION = "3.0.3-dev3-test-name-suffix-fix";
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function cleanText(text = "") {
@@ -1335,15 +1335,32 @@ function getTargetTestActionButton() {
     window.__QC_TARGET_TEST_TITLE__ || ""
   );
 
-  const targetName = normalizeTestTitle(
-    rawManualName || rawPreviewName
-  );
+  const rawTarget = rawManualName || rawPreviewName;
 
-  if (!targetName) {
+  if (!rawTarget) {
     window.__QC_EDIT_ERROR__ =
       "Test name not available for exact row matching";
     return null;
   }
+
+  const normalizedFullName = normalizeTestTitle(rawTarget);
+
+  // Preview title may end with template/type, e.g.
+  // "Weekly Test (...) (Mock And Regular) - MockAndRegular"
+  // while the table NAME cell contains only:
+  // "Weekly Test (...) (Mock And Regular)"
+  const withoutTrailingSuffix = compactText(
+    rawTarget.replace(/\s+-\s+[^-]+$/u, "")
+  );
+
+  const normalizedBaseName = normalizeTestTitle(
+    withoutTrailingSuffix
+  );
+
+  const acceptedNames = new Set(
+    [normalizedFullName, normalizedBaseName]
+      .filter(Boolean)
+  );
 
   const cells = Array.from(
     document.querySelectorAll(
@@ -1351,22 +1368,21 @@ function getTargetTestActionButton() {
     )
   ).filter(isVisible);
 
-  const exactNameCells = cells.filter(cell => {
+  const matchingCells = cells.filter(cell => {
     const cellText = normalizeTestTitle(
       cell.innerText || cell.textContent || ""
     );
 
-    return cellText === targetName;
+    return acceptedNames.has(cellText);
   });
 
-  if (exactNameCells.length === 0) {
+  if (matchingCells.length === 0) {
     window.__QC_EDIT_ERROR__ =
-      `Exact test name cell not found for: ${rawManualName || rawPreviewName}`;
+      `Exact test name cell not found for: ${rawTarget}`;
     return null;
   }
 
-  // Prefer the NAME column occurrence whose row also contains a more_vert action button.
-  for (const cell of exactNameCells) {
+  for (const cell of matchingCells) {
     const row = cell.closest(
       "tr, mat-row, .mat-row, .mat-mdc-row, [role='row']"
     );
@@ -1387,13 +1403,11 @@ function getTargetTestActionButton() {
       return text === "more_vert" || icon === "more_vert";
     });
 
-    if (actionButton) {
-      return actionButton;
-    }
+    if (actionButton) return actionButton;
   }
 
   window.__QC_EDIT_ERROR__ =
-    `Exact test row found, but action button missing for: ${rawManualName || rawPreviewName}`;
+    `Exact test row found, but action button missing for: ${rawTarget}`;
 
   return null;
 }
