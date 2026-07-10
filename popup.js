@@ -1,5 +1,5 @@
 const LOG_URL = "https://script.google.com/macros/s/AKfycbzSihN-ZnLwVtIfA_c9Mij1a6b7Hx6d2tUYe11ut6zNaVshEvMiW5bb9gPELROkkY-p/exec";
-const EXTENSION_VERSION = "3.1.0-dev3-final";
+const EXTENSION_VERSION = "3.0.3-dev3-manual-test-name";
 
 let latestCSV = "";
 let latestResponse = null;
@@ -13,7 +13,6 @@ if (typeof pdfjsLib !== "undefined") {
 const emailInput = document.getElementById("qcEmail");
 const emailError = document.getElementById("emailError");
 const runButton = document.getElementById("runQC");
-const result = document.getElementById("result");
 const PW_EMAIL_REGEX = /^[A-Za-z0-9._%+-]+@pw\.live$/i;
 
 chrome.storage.local.get(["qcUser"], data => {
@@ -91,11 +90,9 @@ function finalizeCounts(response) {
   sortRows(response);
   response.errorCount = (response.reportRows || []).filter(r => r.status === "ERROR").length;
   response.warningCount = (response.reportRows || []).filter(r => r.status === "WARNING").length;
-  response.questionsWithErrors = new Set(
-    (response.reportRows || []).filter(r => r.type === "Question" && r.status === "ERROR").map(r => String(r.qno))
-  ).size;
-  response.passCount = Math.max(0, (response.questionsFound || 0) - response.questionsWithErrors);
-  response.csv = response.csv || buildCSV(response);
+  response.questionsWithErrors = new Set((response.reportRows || []).filter(r => r.type === "Question" && r.status === "ERROR").map(r => String(r.qno))).size;
+  response.passCount = Math.max(0, response.questionsFound - response.questionsWithErrors);
+  response.csv = buildCSV(response);
 }
 
 function getErrorDetails(response) {
@@ -103,6 +100,15 @@ function getErrorDetails(response) {
     .filter(r => r.status === "ERROR")
     .map(r => `${r.ruleId} ${r.type} ${r.qno}: ${r.details}`)
     .join(" | ");
+}
+
+function normalizeText(text) {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/^q?\s*\d+[\.)]?\s*/i, "")
+    .replace(/\s+/g, " ")
+    .replace(/[^\p{L}\p{N}\s]/gu, "")
+    .trim();
 }
 
 function readExcelAnswerKey(file) {
@@ -171,12 +177,7 @@ async function applyExcelCompare(response, file) {
     const expected = map[q.qno];
     const admin = String(q.adminAnswer || "").trim().toUpperCase();
     if (expected && admin && admin !== "-" && expected !== admin) {
-      addReportRow(response, {
-        priority: "Critical", type: "Question", qno: q.qno, ruleId: "X001",
-        check: "Excel Answer Compare", status: "ERROR",
-        details: `Excel answer mismatch: Admin=${admin}, Excel=${expected}`,
-        adminAnswer: admin, solutionAnswer: expected, optionsCount: q.optionsCount, videoSolution: q.videoSolution
-      });
+      addReportRow(response, { priority: "Critical", type: "Question", qno: q.qno, ruleId: "X001", check: "Excel Answer Compare", status: "ERROR", details: `Excel answer mismatch: Admin=${admin}, Excel=${expected}`, adminAnswer: admin, solutionAnswer: expected, optionsCount: q.optionsCount, videoSolution: q.videoSolution });
     }
   });
 }
@@ -187,119 +188,112 @@ async function applyPdfCompare(response, file) {
     const expected = map[q.qno];
     const admin = String(q.adminAnswer || "").trim().toUpperCase();
     if (expected && admin && admin !== "-" && expected !== admin) {
-      addReportRow(response, {
-        priority: "Critical", type: "Question", qno: q.qno, ruleId: "P001",
-        check: "PDF Answer Compare", status: "ERROR",
-        details: `PDF answer mismatch: Admin=${admin}, PDF=${expected}`,
-        adminAnswer: admin, solutionAnswer: expected, optionsCount: q.optionsCount, videoSolution: q.videoSolution
-      });
+      addReportRow(response, { priority: "Critical", type: "Question", qno: q.qno, ruleId: "P001", check: "PDF Answer Compare", status: "ERROR", details: `PDF answer mismatch: Admin=${admin}, PDF=${expected}`, adminAnswer: admin, solutionAnswer: expected, optionsCount: q.optionsCount, videoSolution: q.videoSolution });
     }
   });
 }
 
-runButton.addEventListener("click", async () => {
+document.getElementById("runQC").addEventListener("click", async () => {
+  const result = document.getElementById("result");
   if (!validateEmailField()) return;
 
   const qcEmail = String(emailInput.value || "").trim().toLowerCase();
   chrome.storage.local.set({ qcUser: qcEmail });
-  runButton.disabled = true;
-  result.innerHTML = "Running QC FINAL... Please wait. Do not touch the page.";
 
-  try {
-    const expectedInput = document.getElementById("expectedCount")?.value;
-    const manualExpectedQuestions = expectedInput ? Number(expectedInput) : null;
-    const hasVideoSolutions = document.getElementById("hasVideoSolutions")?.checked === true;
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  result.innerHTML = "Running QC 2.0 DEV2... Please wait.";
 
-    chrome.tabs.sendMessage(
-      tab.id,
-      {
-        action: "RUN_QC_DEV3",
-        options: {
-          qcUserEmail: qcEmail,
-          manualExpectedQuestions,
-          hasVideoSolutions,
-          videoRequired: hasVideoSolutions
-        }
-      },
-      async response => {
-        runButton.disabled = false;
+  const expectedInput = document.getElementById("expectedCount")?.value;
+  const manualExpectedQuestions = expectedInput ? Number(expectedInput) : null;
+  const hasVideoSolutions = document.getElementById("hasVideoSolutions")?.checked === true;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-        if (chrome.runtime.lastError || !response) {
-          result.innerHTML = "Content script response nahi mila. Admin page refresh karo, extension reload karo, phir run karo.";
-          return;
-        }
+  const manualTestName = String(
+    document.getElementById("testName")?.value || ""
+  ).trim();
 
-        const excelFile = document.getElementById("excelFile")?.files[0];
-        if (excelFile) {
-          try { await applyExcelCompare(response, excelFile); }
-          catch { addReportRow(response, { priority: "Critical", type: "Test", qno: "-", ruleId: "X000", check: "Excel File", status: "ERROR", details: "Excel file could not be read" }); }
-        }
-
-        const pdfFile = document.getElementById("pdfFile")?.files[0];
-        if (pdfFile) {
-          try { await applyPdfCompare(response, pdfFile); }
-          catch { addReportRow(response, { priority: "Critical", type: "Test", qno: "-", ruleId: "P000", check: "PDF File", status: "ERROR", details: "PDF file could not be read" }); }
-        }
-
-        finalizeCounts(response);
-        latestCSV = response.csv || "";
-        latestResponse = response;
-        latestTabUrl = tab.url;
-        latestUser = qcEmail;
-
-        sendLog({
-          user: latestUser,
-          event: "RUN_QC_DEV3_CLEAN",
-          testUrl: latestTabUrl,
-          questionsFound: response.questionsFound,
-          passCount: response.passCount,
-          errorCount: response.errorCount,
-          warningCount: response.warningCount,
-          imagesFound: response.imagesFound,
-          downloaded: "No",
-          errorDetails: getErrorDetails(response),
-          extensionVersion: EXTENSION_VERSION
-        });
-
-        result.innerHTML = `
-          <b>QC Report DEV3 FINAL</b><br><br>
-          Questions Found: ${response.questionsFound}<br>
-          Question Errors: ${response.questionsWithErrors}<br>
-          Report Errors: ${response.errorCount}<br>
-          Warnings: ${response.warningCount}<br>
-          Images Found: ${response.imagesFound}<br><br>
-          <button id="downloadReport">Download CSV Report</button>
-        `;
-
-        document.getElementById("downloadReport").addEventListener("click", () => {
-          sendLog({
-            user: latestUser || "Unknown",
-            event: "DOWNLOAD_REPORT",
-            testUrl: latestTabUrl,
-            questionsFound: latestResponse.questionsFound,
-            passCount: latestResponse.passCount,
-            errorCount: latestResponse.errorCount,
-            warningCount: latestResponse.warningCount,
-            imagesFound: latestResponse.imagesFound,
-            downloaded: "Yes",
-            errorDetails: getErrorDetails(latestResponse),
-            csvContent: latestCSV,
-            extensionVersion: EXTENSION_VERSION
-          });
-
-          const blob = new Blob([latestCSV], { type: "text/csv" });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = `QC_Assistant_DEV3_FINAL_Report_${Date.now()}.csv`;
-          a.click();
-          URL.revokeObjectURL(url);
-        });
+  chrome.tabs.sendMessage(
+    tab.id,
+    {
+      action: "RUN_QC_V2",
+      options: {
+        qcUserEmail: qcEmail,
+        manualExpectedQuestions,
+        hasVideoSolutions,
+        manualTestName
       }
-    );
-  } catch (err) {
-    runButton.disabled = false;
-    result.innerHTML = `Popup error: ${err.message || err}`;
-  }
+    },
+    async response => {
+    if (chrome.runtime.lastError || !response) {
+      result.innerHTML = "Admin page refresh karo, Preview Test & Questions ya Edit Test open karo, phir Run QC 2.0 dabao.";
+      return;
+    }
+
+    const excelFile = document.getElementById("excelFile")?.files[0];
+    if (excelFile) {
+      try { await applyExcelCompare(response, excelFile); }
+      catch { addReportRow(response, { priority: "Critical", type: "Test", qno: "-", ruleId: "X000", check: "Excel File", status: "ERROR", details: "Excel file could not be read" }); }
+    }
+
+    const pdfFile = document.getElementById("pdfFile")?.files[0];
+    if (pdfFile) {
+      try { await applyPdfCompare(response, pdfFile); }
+      catch { addReportRow(response, { priority: "Critical", type: "Test", qno: "-", ruleId: "P000", check: "PDF File", status: "ERROR", details: "PDF file could not be read" }); }
+    }
+
+    finalizeCounts(response);
+    latestCSV = response.csv || "";
+    latestResponse = response;
+    latestTabUrl = tab.url;
+    latestUser = qcEmail;
+
+    sendLog({
+      user: latestUser,
+      event: "RUN_QC",
+      testUrl: latestTabUrl,
+      questionsFound: response.questionsFound,
+      passCount: response.passCount,
+      errorCount: response.errorCount,
+      warningCount: response.warningCount,
+      imagesFound: response.imagesFound,
+      downloaded: "No",
+      errorDetails: getErrorDetails(response),
+      extensionVersion: EXTENSION_VERSION
+    });
+
+    result.innerHTML = `
+      <b>QC Report v2.0 DEV2</b><br><br>
+      Questions Found: ${response.questionsFound}<br>
+      Question Errors: ${response.questionsWithErrors}<br>
+      Report Errors: ${response.errorCount}<br>
+      Warnings: ${response.warningCount}<br>
+      Images Found: ${response.imagesFound}<br><br>
+      <button id="downloadReport">Download CSV Report</button>
+    `;
+
+    document.getElementById("downloadReport").addEventListener("click", () => {
+      sendLog({
+        user: latestUser || "Unknown",
+        event: "DOWNLOAD_REPORT",
+        testUrl: latestTabUrl,
+        questionsFound: latestResponse.questionsFound,
+        passCount: latestResponse.passCount,
+        errorCount: latestResponse.errorCount,
+        warningCount: latestResponse.warningCount,
+        imagesFound: latestResponse.imagesFound,
+        downloaded: "Yes",
+        errorDetails: getErrorDetails(latestResponse),
+        csvContent: latestCSV,
+        extensionVersion: EXTENSION_VERSION
+      });
+
+      const blob = new Blob([latestCSV], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `QC_Assistant_DEV2_Report_${Date.now()}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+    }
+  );
 });
