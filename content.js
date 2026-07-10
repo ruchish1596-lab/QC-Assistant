@@ -1,6 +1,6 @@
-console.log("QC Assistant DEV3.3 Manual Test Name Loaded");
+console.log("QC Assistant DEV3.3 Multilingual Validation Loaded");
 
-const QC_VERSION = "3.0.3-dev3-manual-test-name";
+const QC_VERSION = "3.0.3-dev3-multilingual-validation";
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function cleanText(text = "") {
@@ -816,22 +816,317 @@ function getValueAfterLabel(text, regex) {
   return "";
 }
 
+
+function normalizeLocalizedDigits(value = "") {
+  const digitRanges = [
+    [0x0966, 0x096F], // Devanagari
+    [0x09E6, 0x09EF], // Bengali
+    [0x0A66, 0x0A6F], // Gurmukhi
+    [0x0AE6, 0x0AEF], // Gujarati
+    [0x0B66, 0x0B6F], // Odia
+    [0x0BE6, 0x0BEF], // Tamil
+    [0x0C66, 0x0C6F], // Telugu
+    [0x0CE6, 0x0CEF], // Kannada
+    [0x0D66, 0x0D6F], // Malayalam
+    [0x0660, 0x0669], // Arabic-Indic
+    [0x06F0, 0x06F9]  // Extended Arabic-Indic
+  ];
+
+  return String(value).replace(/[\u0660-\u0669\u06F0-\u06F9\u0966-\u096F\u09E6-\u09EF\u0A66-\u0A6F\u0AE6-\u0AEF\u0B66-\u0B6F\u0BE6-\u0BEF\u0C66-\u0C6F\u0CE6-\u0CEF\u0D66-\u0D6F]/g, char => {
+    const code = char.charCodeAt(0);
+
+    for (const [start, end] of digitRanges) {
+      if (code >= start && code <= end) {
+        return String(code - start);
+      }
+    }
+
+    return char;
+  });
+}
+
+function collectNumbersNearKeywords(text, keywordPattern, maxDistance = 35) {
+  const normalized = normalizeLocalizedDigits(text);
+  const results = [];
+  const numberPattern = /\d+(?:\.\d+)?/g;
+  const keywordRegex = new RegExp(keywordPattern, "giu");
+
+  const numbers = [];
+  let numberMatch;
+
+  while ((numberMatch = numberPattern.exec(normalized)) !== null) {
+    numbers.push({
+      value: Number(numberMatch[0]),
+      index: numberMatch.index
+    });
+  }
+
+  let keywordMatch;
+
+  while ((keywordMatch = keywordRegex.exec(normalized)) !== null) {
+    const keywordIndex = keywordMatch.index;
+
+    numbers.forEach(item => {
+      const distance = Math.abs(item.index - keywordIndex);
+
+      if (
+        distance <= maxDistance &&
+        Number.isFinite(item.value) &&
+        !results.includes(item.value)
+      ) {
+        results.push(item.value);
+      }
+    });
+  }
+
+  return results;
+}
+
 function findDurations(text) {
+  const normalized = normalizeLocalizedDigits(text);
+
+  const minuteWords = [
+    "minute", "minutes", "min", "mins",
+    "मिनट", "मिनटों", "मिनिट", "मिनिट्स",
+    "মিনিট", "মিনিটে",
+    "ਮਿੰਟ",
+    "મિનિટ",
+    "ମିନିଟ",
+    "நிமிடம்", "நிமிடங்கள்",
+    "నిమిషం", "నిమిషాలు",
+    "ನಿಮಿಷ", "ನಿಮಿಷಗಳು",
+    "മിനിറ്റ്", "മിനിറ്റുകൾ",
+    "دقيقة", "دقائق"
+  ];
+
+  const hourWords = [
+    "hour", "hours", "hr", "hrs",
+    "घंटा", "घंटे", "घण्टा", "घण्टे",
+    "ঘণ্টা", "ঘন্টা",
+    "ਘੰਟਾ", "ਘੰਟੇ",
+    "કલાક",
+    "ଘଣ୍ଟା",
+    "மணி", "மணிநேரம்",
+    "గంట", "గంటలు",
+    "ಗಂಟೆ", "ಗಂಟೆಗಳು",
+    "മണിക്കൂർ", "മണിക്കൂറുകൾ",
+    "ساعة", "ساعات"
+  ];
+
+  const timeWords = [
+    "time", "duration", "given time", "time given", "test time",
+    "समय", "अवधि", "दिया गया समय", "समय अवधि",
+    "সময়", "সময়কাল",
+    "ਸਮਾਂ", "ਅਵਧੀ",
+    "સમય", "અવધિ",
+    "ସମୟ", "ଅବଧି",
+    "நேரம்", "கால அளவு",
+    "సమయం", "వ్యవధి",
+    "ಸಮಯ", "ಅವಧಿ",
+    "സമയം", "ദൈർഘ്യം",
+    "وقت", "مدة"
+  ];
+
+  const values = [];
+
+  const minutePattern = minuteWords
+    .map(word => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+
+  const hourPattern = hourWords
+    .map(word => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+
+  const timePattern = timeWords
+    .map(word => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+
+  const directMinuteRegex = new RegExp(
+    `(\\d+(?:\\.\\d+)?)\\s*(?:${minutePattern})|(?:${minutePattern})\\s*[:\\-]?\\s*(\\d+(?:\\.\\d+)?)`,
+    "giu"
+  );
+
+  const directHourRegex = new RegExp(
+    `(\\d+(?:\\.\\d+)?)\\s*(?:${hourPattern})|(?:${hourPattern})\\s*[:\\-]?\\s*(\\d+(?:\\.\\d+)?)`,
+    "giu"
+  );
+
+  let match;
+
+  while ((match = directMinuteRegex.exec(normalized)) !== null) {
+    const value = Number(match[1] || match[2]);
+
+    if (
+      Number.isFinite(value) &&
+      value > 0 &&
+      value < 10000 &&
+      !values.includes(value)
+    ) {
+      values.push(value);
+    }
+  }
+
+  while ((match = directHourRegex.exec(normalized)) !== null) {
+    const hours = Number(match[1] || match[2]);
+    const minutes = hours * 60;
+
+    if (
+      Number.isFinite(minutes) &&
+      minutes > 0 &&
+      minutes < 10000 &&
+      !values.includes(minutes)
+    ) {
+      values.push(minutes);
+    }
+  }
+
+  // Fallback for unusual word order:
+  // number near a time keyword and near a unit.
+  const timeNumbers = collectNumbersNearKeywords(
+    normalized,
+    timePattern,
+    40
+  );
+
+  const minuteNumbers = collectNumbersNearKeywords(
+    normalized,
+    minutePattern,
+    25
+  );
+
+  const hourNumbers = collectNumbersNearKeywords(
+    normalized,
+    hourPattern,
+    25
+  );
+
+  timeNumbers.forEach(value => {
+    if (
+      minuteNumbers.includes(value) &&
+      value > 0 &&
+      value < 10000 &&
+      !values.includes(value)
+    ) {
+      values.push(value);
+    }
+
+    if (
+      hourNumbers.includes(value) &&
+      value > 0 &&
+      value * 60 < 10000 &&
+      !values.includes(value * 60)
+    ) {
+      values.push(value * 60);
+    }
+  });
+
+  return values;
+}
+
+
+function findInstructionQuestionCounts(text) {
+  const normalized = normalizeLocalizedDigits(text);
+
+  const questionWords = [
+    "question", "questions", "ques", "qns",
+    "प्रश्न", "प्रश्नों", "सवाल", "सवालों",
+    "প্রশ্ন", "প্রশ্নগুলি",
+    "ਸਵਾਲ", "ਪ੍ਰਸ਼ਨ",
+    "પ્રશ્ન", "સવાલ",
+    "ପ୍ରଶ୍ନ",
+    "கேள்வி", "கேள்விகள்",
+    "ప్రశ్న", "ప్రశ్నలు",
+    "ಪ್ರಶ್ನೆ", "ಪ್ರಶ್ನೆಗಳು",
+    "ചോദ്യം", "ചോദ്യങ്ങൾ",
+    "سوال", "سوالات"
+  ];
+
+  const countWords = [
+    "total", "contain", "contains", "will contain", "number of",
+    "कुल", "होंगे", "रहेंगे", "संख्या",
+    "মোট", "থাকবে", "সংখ্যা",
+    "ਕੁੱਲ", "ਗਿਣਤੀ",
+    "કુલ", "સંખ્યા",
+    "ମୋଟ", "ସଂଖ୍ୟା",
+    "மொத்த", "எண்ணிக்கை",
+    "మొత్తం", "సంఖ్య",
+    "ಒಟ್ಟು", "ಸಂಖ್ಯೆ",
+    "ആകെ", "എണ്ണം",
+    "کل", "تعداد"
+  ];
+
+  const questionPattern = questionWords
+    .map(word => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+
+  const countPattern = countWords
+    .map(word => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+
+  const found = [];
+
+  const directRegex = new RegExp(
+    `(?:${countPattern})?[^\\d]{0,25}(\\d+)[^\\d]{0,25}(?:${questionPattern})|(?:${questionPattern})[^\\d]{0,25}(\\d+)`,
+    "giu"
+  );
+
+  let match;
+
+  while ((match = directRegex.exec(normalized)) !== null) {
+    const value = Number(match[1] || match[2]);
+
+    if (
+      Number.isFinite(value) &&
+      value > 0 &&
+      value < 10000 &&
+      !found.includes(value)
+    ) {
+      found.push(value);
+    }
+  }
+
+  // Fallback for unusual sentence order.
+  const nearQuestion = collectNumbersNearKeywords(
+    normalized,
+    questionPattern,
+    35
+  );
+
+  nearQuestion.forEach(value => {
+    if (
+      value > 0 &&
+      value < 10000 &&
+      !found.includes(value)
+    ) {
+      found.push(value);
+    }
+  });
+
+  return found;
+}
+
+function findInstructionTotalMarks(text) {
   const found = [];
 
   const patterns = [
-    /(?:duration|time\s*given|total\s*duration)[^\d]{0,50}(\d+)\s*(?:minutes?|mins?)/gi,
-    /(\d+)\s*(?:minutes?|mins?)\s*(?:duration|time)/gi
+    /total\s+marks?\s*[:\-]?\s*(\d+(?:\.\d+)?)/gi,
+    /maximum\s+marks?\s*[:\-]?\s*(\d+(?:\.\d+)?)/gi,
+    /(\d+(?:\.\d+)?)\s+marks?\s+(?:in\s+total|total)/gi
   ];
 
-  patterns.forEach(re => {
+  patterns.forEach(regex => {
     let match;
 
-    while ((match = re.exec(text)) !== null) {
-      const n = Number(match[1]);
+    while ((match = regex.exec(text)) !== null) {
+      const value = Number(match[1]);
 
-      if (n > 0 && n < 1000 && !found.includes(n)) {
-        found.push(n);
+      if (
+        Number.isFinite(value) &&
+        value >= 0 &&
+        value < 100000 &&
+        !found.includes(value)
+      ) {
+        found.push(value);
       }
     }
   });
@@ -1294,6 +1589,7 @@ function readEditConfig(scannedCount) {
         allowSubmit: null,
         totalQuestions: null,
         duration: null,
+        totalMarks: null,
         syllabus: null,
         videoRequired: false
       }
@@ -1314,9 +1610,17 @@ function readEditConfig(scannedCount) {
     /display\s+order|total\s+questions|total\s+marks|available/i
   );
 
+  const totalMarks = getNumberByLabel(
+    root,
+    /total\s+marks\s*\*?/i,
+    /display\s+order|total\s+questions|duration|available/i
+  );
+
   const allowSubmit = getCheckboxState(root, "Allow Submit");
+
   const disableVideo = getCheckboxState(root, "Disable Video Solution");
   const videoRequired = disableVideo === false;
+
   const syllabus = syllabusStatus(text);
 
   if (allowSubmit === false) {
@@ -1373,30 +1677,83 @@ function readEditConfig(scannedCount) {
       status: "ERROR",
       details: "Duration In Minutes field missing"
     }));
-  } else {
-    const instructionDurations = findDurations(text);
+  }
 
-    if (instructionDurations.length === 0) {
-      rows.push(reportRow({
-        priority: "Warning",
-        type: "Test",
-        qno: "-",
-        ruleId: "T004",
-        check: "Duration in Instructions",
-        status: "WARNING",
-        details: "Duration not mentioned in instructions"
-      }));
-    } else if (!instructionDurations.includes(duration)) {
-      rows.push(reportRow({
-        priority: "Critical",
-        type: "Test",
-        qno: "-",
-        ruleId: "T004",
-        check: "Duration in Instructions",
-        status: "ERROR",
-        details: `Duration field = ${duration} min, Instructions = ${instructionDurations.join("/")} min`
-      }));
-    }
+  if (totalMarks === null) {
+    rows.push(reportRow({
+      priority: "Warning",
+      type: "Test",
+      qno: "-",
+      ruleId: "T008",
+      check: "Total Marks",
+      status: "WARNING",
+      details: "Total Marks field not found"
+    }));
+  }
+
+  const instructionDurations = findDurations(text);
+
+  if (instructionDurations.length === 0) {
+    rows.push(reportRow({
+      priority: "Warning",
+      type: "Test",
+      qno: "-",
+      ruleId: "T004",
+      check: "Duration in Instructions",
+      status: "WARNING",
+      details: "Duration not mentioned in instructions"
+    }));
+  } else if (
+    duration !== null &&
+    !instructionDurations.includes(duration)
+  ) {
+    rows.push(reportRow({
+      priority: "Critical",
+      type: "Test",
+      qno: "-",
+      ruleId: "T004",
+      check: "Duration in Instructions",
+      status: "ERROR",
+      details: `Duration field = ${duration} min, Instructions = ${instructionDurations.join("/")} min`
+    }));
+  }
+
+  const instructionQuestionCounts =
+    findInstructionQuestionCounts(text);
+
+  if (
+    totalQuestions !== null &&
+    instructionQuestionCounts.length > 0 &&
+    !instructionQuestionCounts.includes(totalQuestions)
+  ) {
+    rows.push(reportRow({
+      priority: "Critical",
+      type: "Test",
+      qno: "-",
+      ruleId: "T009",
+      check: "Questions in Instructions",
+      status: "ERROR",
+      details: `Total Questions field = ${totalQuestions}, Instructions = ${instructionQuestionCounts.join("/")}`
+    }));
+  }
+
+  const instructionTotalMarks =
+    findInstructionTotalMarks(text);
+
+  if (
+    totalMarks !== null &&
+    instructionTotalMarks.length > 0 &&
+    !instructionTotalMarks.includes(totalMarks)
+  ) {
+    rows.push(reportRow({
+      priority: "Critical",
+      type: "Test",
+      qno: "-",
+      ruleId: "T010",
+      check: "Total Marks in Instructions",
+      status: "ERROR",
+      details: `Total Marks field = ${totalMarks}, Instructions = ${instructionTotalMarks.join("/")}`
+    }));
   }
 
   if (!syllabus.found || syllabus.missing) {
@@ -1449,6 +1806,7 @@ function readEditConfig(scannedCount) {
       allowSubmit,
       totalQuestions,
       duration,
+      totalMarks,
       syllabus: syllabus.value || null,
       videoRequired
     }
