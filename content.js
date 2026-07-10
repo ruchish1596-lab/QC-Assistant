@@ -563,8 +563,14 @@ function findNextButton(root) {
 
 
 
+
 async function scanPreview(options = {}) {
   const firstRoot = getPreviewRoot();
+
+  console.log("[QC DEBUG] scanPreview started", {
+    previewRootFound: Boolean(firstRoot),
+    time: new Date().toISOString()
+  });
 
   if (!firstRoot) {
     return {
@@ -586,16 +592,42 @@ async function scanPreview(options = {}) {
     firstRoot.innerText || firstRoot.textContent || ""
   );
 
+  console.log("[QC DEBUG] instructions captured", {
+    length: instructionsText.length,
+    previewStart: instructionsText.slice(0, 300)
+  });
+
   for (let page = 1; page <= maxPages; page++) {
     const pageRoot = getPreviewRoot() || firstRoot;
+
+    console.log(`[QC DEBUG] ===== PAGE ${page} START =====`);
+
+    const scrollContainer = getScrollContainer(pageRoot);
+
+    console.log("[QC DEBUG] scroll container", {
+      found: Boolean(scrollContainer),
+      className: String(scrollContainer?.className || ""),
+      clientHeight: scrollContainer?.clientHeight || 0,
+      scrollHeight: scrollContainer?.scrollHeight || 0,
+      scrollTopBefore: scrollContainer?.scrollTop || 0
+    });
 
     await autoScrollRoot(pageRoot);
 
     const current = extractQuestions(pageRoot, options);
+    const currentQuestionNumbers = current.questions.map(q => q.qno);
+    const currentSignature = current.questions
+      .map(q => `${q.qno}:${compactText(q.question).slice(0, 100)}`)
+      .join("|");
+
+    console.log("[QC DEBUG] page extracted", {
+      page,
+      questionsFound: current.questions.length,
+      questionNumbers: currentQuestionNumbers
+    });
 
     current.questions.forEach(q => {
       const key = questionUniqueKey(q);
-
       if (!seenQuestionKeys.has(key)) {
         seenQuestionKeys.add(key);
         allQuestions.push(q);
@@ -606,40 +638,77 @@ async function scanPreview(options = {}) {
 
     const rootRect = pageRoot.getBoundingClientRect();
 
-    const nextButton = Array.from(
+    const allNextButtons = Array.from(
       document.querySelectorAll("button[aria-label='Next page']")
     )
       .filter(isVisible)
-      .filter(btn => {
+      .map((btn, index) => {
+        const rect = btn.getBoundingClientRect();
         const disabled =
           btn.disabled ||
           btn.getAttribute("disabled") !== null ||
           btn.getAttribute("aria-disabled") === "true" ||
           btn.classList.contains("mat-button-disabled") ||
-          btn.classList.contains("mat-mdc-button-disabled") ||
-          Boolean(
-            btn.closest(
-              ".mat-button-disabled,.mat-mdc-button-disabled"
-            )
-          );
+          btn.classList.contains("mat-mdc-button-disabled");
 
-        if (disabled) return false;
-
-        const rect = btn.getBoundingClientRect();
         const centreX = rect.left + rect.width / 2;
         const centreY = rect.top + rect.height / 2;
 
-        return (
+        const insidePreview = (
           centreX >= rootRect.left &&
           centreX <= rootRect.right &&
           centreY >= rootRect.top &&
           centreY <= rootRect.bottom
         );
-      })
-      .find(Boolean);
 
-    if (!nextButton) break;
+        const paginator =
+          btn.closest(
+            "mat-paginator,.mat-mdc-paginator,.mat-paginator,[class*='paginator']"
+          ) || btn.parentElement?.parentElement;
 
+        return {
+          index,
+          btn,
+          disabled,
+          insidePreview,
+          rect: {
+            left: rect.left,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom
+          },
+          paginatorText: compactText(
+            paginator?.innerText || paginator?.textContent || ""
+          )
+        };
+      });
+
+    console.log("[QC DEBUG] next button candidates",
+      allNextButtons.map(item => ({
+        index: item.index,
+        disabled: item.disabled,
+        insidePreview: item.insidePreview,
+        rect: item.rect,
+        paginatorText: item.paginatorText
+      }))
+    );
+
+    const selected = allNextButtons.find(
+      item => !item.disabled && item.insidePreview
+    );
+
+    console.log("[QC DEBUG] selected next button", selected ? {
+      index: selected.index,
+      paginatorText: selected.paginatorText,
+      rect: selected.rect
+    } : null);
+
+    if (!selected) {
+      console.log("[QC DEBUG] stopping: no enabled Preview next button");
+      break;
+    }
+
+    const nextButton = selected.btn;
     const paginator =
       nextButton.closest(
         "mat-paginator,.mat-mdc-paginator,.mat-paginator,[class*='paginator']"
@@ -649,13 +718,16 @@ async function scanPreview(options = {}) {
       paginator?.innerText || paginator?.textContent || ""
     );
 
-    const pageState = `${beforeRange}|${current.questions
-      .map(q => q.qno)
-      .join(",")}`;
+    const pageState = `${beforeRange}|${currentQuestionNumbers.join(",")}`;
 
-    if (seenPageStates.has(pageState)) break;
+    if (seenPageStates.has(pageState)) {
+      console.log("[QC DEBUG] stopping: repeated page state", pageState);
+      break;
+    }
+
     seenPageStates.add(pageState);
 
+    console.log("[QC DEBUG] clicking Preview next button", { beforeRange });
     nextButton.click();
 
     let pageChanged = false;
@@ -667,32 +739,46 @@ async function scanPreview(options = {}) {
         paginator?.innerText || paginator?.textContent || ""
       );
 
-      if (afterRange && afterRange !== beforeRange) {
-        pageChanged = true;
-        break;
-      }
-
       const afterRoot = getPreviewRoot() || pageRoot;
       const afterCurrent = extractQuestions(afterRoot, options);
-
-      const beforeSignature = current.questions
-        .map(q => `${q.qno}:${compactText(q.question).slice(0, 100)}`)
-        .join("|");
-
+      const afterQuestionNumbers = afterCurrent.questions.map(q => q.qno);
       const afterSignature = afterCurrent.questions
         .map(q => `${q.qno}:${compactText(q.question).slice(0, 100)}`)
         .join("|");
 
-      if (afterSignature && afterSignature !== beforeSignature) {
+      console.log("[QC DEBUG] change check", {
+        attempt: attempt + 1,
+        beforeRange,
+        afterRange,
+        rangeChanged: Boolean(afterRange && afterRange !== beforeRange),
+        beforeQuestionNumbers: currentQuestionNumbers,
+        afterQuestionNumbers,
+        signatureChanged: Boolean(
+          afterSignature && afterSignature !== currentSignature
+        )
+      });
+
+      if (
+        (afterRange && afterRange !== beforeRange) ||
+        (afterSignature && afterSignature !== currentSignature)
+      ) {
         pageChanged = true;
         break;
       }
     }
 
-    if (!pageChanged) break;
+    if (!pageChanged) {
+      console.log("[QC DEBUG] stopping: page did not change after click");
+      break;
+    }
   }
 
   allQuestions.sort((a, b) => Number(a.qno) - Number(b.qno));
+
+  console.log("[QC DEBUG] scanPreview finished", {
+    totalQuestions: allQuestions.length,
+    questionNumbers: allQuestions.map(q => q.qno)
+  });
 
   return {
     questions: allQuestions,
