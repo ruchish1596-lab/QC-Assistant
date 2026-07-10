@@ -386,47 +386,26 @@ function imageWarnings(contentEl) {
   return warnings;
 }
 
-
 function extractQuestions(root, options = {}) {
   if (!root) return { questions: [], reportRows: [] };
 
-  const titles = Array.from(
-    root.querySelectorAll("mat-card-title")
-  ).filter(isVisible);
-
+  const titles = Array.from(root.querySelectorAll("mat-card-title")).filter(isVisible);
+  const contents = Array.from(root.querySelectorAll("mat-card-content"));
   const questions = [];
   const rows = [];
 
   titles.forEach((title, index) => {
     const questionText = compactText(title.innerText || "");
-
-    const card =
-      title.closest(
-        "mat-card,.mat-card,.mat-mdc-card,[class*='mat-card']"
-      ) || title.parentElement;
-
-    const contentEl =
-      card?.querySelector("mat-card-content") ||
-      title.parentElement?.querySelector("mat-card-content") ||
-      null;
-
+    const contentEl = contents[index];
     const contentText = contentEl?.innerText || "";
-
     const greenOptions = contentEl
-      ? Array.from(contentEl.querySelectorAll(
-          ".bg-green-200,.bg-green-100,[class*='green']"
-        ))
+      ? Array.from(contentEl.querySelectorAll(".bg-green-200, .bg-green-100, [class*='green']"))
       : [];
 
-    const adminAnswers = greenOptions
-      .map(opt => getOptionLetter(opt.innerText))
-      .filter(Boolean);
-
+    const adminAnswers = greenOptions.map(opt => getOptionLetter(opt.innerText)).filter(Boolean);
     const solutionAnswer = getSolutionAnswer(contentText);
     const opts = extractOptions(contentText);
-    const videoStatus = hasVideoSolution(contentEl)
-      ? "Attached"
-      : "Missing";
+    const videoStatus = hasVideoSolution(contentEl) ? "Attached" : "Missing";
 
     const qnoMatch =
       questionText.match(/^\s*(?:Q\s*)?(\d+)[\.)]\s+/i) ||
@@ -492,23 +471,11 @@ function extractQuestions(root, options = {}) {
     }
 
     if (adminAnswers.length > 1) {
-      addError(
-        "Q003",
-        "Correct Answer",
-        `Multiple correct answers marked: ${adminAnswers.join(", ")}`
-      );
+      addError("Q003", "Correct Answer", `Multiple correct answers marked: ${adminAnswers.join(", ")}`);
     }
 
-    if (
-      adminAnswers.length === 1 &&
-      solutionAnswer &&
-      adminAnswers[0] !== solutionAnswer
-    ) {
-      addError(
-        "Q004",
-        "Answer Mismatch",
-        `Green marked ${adminAnswers[0]}, Solution says ${solutionAnswer}`
-      );
+    if (adminAnswers.length === 1 && solutionAnswer && adminAnswers[0] !== solutionAnswer) {
+      addError("Q004", "Answer Mismatch", `Green marked ${adminAnswers[0]}, Solution says ${solutionAnswer}`);
     }
 
     if (!hasMeaningfulSolution(contentText)) {
@@ -516,16 +483,12 @@ function extractQuestions(root, options = {}) {
     }
 
     if (opts.length !== 4) {
-      addWarning(
-        "W001",
-        "Options Count",
-        `Options count is ${opts.length}, expected exactly 4`
-      );
+      addWarning("W001", "Options Count", `Options count is ${opts.length}, expected exactly 4`);
     }
 
-    const hasQuestionImage = Boolean(
-      contentEl?.querySelector("img")
-    );
+    // Video warning is generated only after Edit Test configuration is read.
+
+    const hasQuestionImage = Boolean(contentEl?.querySelector("img"));
 
     if (
       questionText.length > 0 &&
@@ -535,9 +498,7 @@ function extractQuestions(root, options = {}) {
       addWarning("W004", "Question Text", "Question text too short");
     }
 
-    imageWarnings(contentEl).forEach(msg =>
-      addWarning("W006", "Image Quality", msg)
-    );
+    imageWarnings(contentEl).forEach(msg => addWarning("W006", "Image Quality", msg));
 
     questions.push(q);
   });
@@ -603,6 +564,7 @@ function findNextButton(root) {
 
 
 
+
 async function scanPreview(options = {}) {
   const firstRoot = getPreviewRoot();
 
@@ -619,7 +581,7 @@ async function scanPreview(options = {}) {
   const allQuestions = [];
   const rows = [];
   const seenQuestionKeys = new Set();
-  const seenPageSignatures = new Set();
+  const seenFirstTitles = new Set();
   const maxPages = 100;
 
   const instructionsText = cleanText(
@@ -634,12 +596,12 @@ async function scanPreview(options = {}) {
 
     const current = extractQuestions(pageRoot, options);
 
-    const pageSignature = current.questions
-      .map(q => `${q.qno}:${compactText(q.question).slice(0, 120)}`)
-      .join("|");
+    const firstTitle = compactText(
+      pageRoot.querySelector("mat-card-title")?.innerText || ""
+    );
 
-    if (pageSignature && seenPageSignatures.has(pageSignature)) break;
-    if (pageSignature) seenPageSignatures.add(pageSignature);
+    if (firstTitle && seenFirstTitles.has(firstTitle)) break;
+    if (firstTitle) seenFirstTitles.add(firstTitle);
 
     current.questions.forEach(q => {
       const key = questionUniqueKey(q);
@@ -652,13 +614,13 @@ async function scanPreview(options = {}) {
 
     rows.push(...current.reportRows);
 
-    const nextButtons = Array.from(
-      document.querySelectorAll(
+    const nextButton = Array.from(
+      pageRoot.querySelectorAll(
         "button[aria-label='Next page'],button.mat-paginator-navigation-next"
       )
     )
       .filter(isVisible)
-      .filter(btn => !(
+      .find(btn => !(
         btn.disabled ||
         btn.getAttribute("disabled") !== null ||
         btn.getAttribute("aria-disabled") === "true" ||
@@ -666,31 +628,30 @@ async function scanPreview(options = {}) {
         btn.classList.contains("mat-mdc-button-disabled")
       ));
 
-    const nextButton = nextButtons[nextButtons.length - 1];
-
     if (!nextButton) break;
 
     nextButton.click();
 
-    let changed = false;
+    let pageChanged = false;
 
     for (let attempt = 0; attempt < 20; attempt++) {
       await sleep(500);
 
       const afterRoot = getPreviewRoot() || pageRoot;
-      const after = extractQuestions(afterRoot, options);
+      const afterFirstTitle = compactText(
+        afterRoot.querySelector("mat-card-title")?.innerText || ""
+      );
 
-      const afterSignature = after.questions
-        .map(q => `${q.qno}:${compactText(q.question).slice(0, 120)}`)
-        .join("|");
-
-      if (afterSignature && afterSignature !== pageSignature) {
-        changed = true;
+      if (
+        afterFirstTitle &&
+        afterFirstTitle !== firstTitle
+      ) {
+        pageChanged = true;
         break;
       }
     }
 
-    if (!changed) break;
+    if (!pageChanged) break;
   }
 
   allQuestions.sort((a, b) => Number(a.qno) - Number(b.qno));
