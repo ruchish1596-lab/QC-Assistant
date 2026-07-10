@@ -579,9 +579,9 @@ async function scanPreview(options = {}) {
   const allQuestions = [];
   const rows = [];
   const seenQuestionKeys = new Set();
-  const maxPages = 20;
+  const seenPageStates = new Set();
+  const maxPages = 100;
 
-  // Save General Instructions before Preview closes.
   const instructionsText = cleanText(
     firstRoot.innerText || firstRoot.textContent || ""
   );
@@ -592,13 +592,6 @@ async function scanPreview(options = {}) {
     await autoScrollRoot(pageRoot);
 
     const current = extractQuestions(pageRoot, options);
-
-    console.log(
-      "QC page scan:",
-      page,
-      "Questions:",
-      current.questions.length
-    );
 
     current.questions.forEach(q => {
       const key = questionUniqueKey(q);
@@ -611,65 +604,95 @@ async function scanPreview(options = {}) {
 
     rows.push(...current.reportRows);
 
+    const rootRect = pageRoot.getBoundingClientRect();
+
     const nextButton = Array.from(
-      document.querySelectorAll("button")
-    ).find(btn => {
-      const label = btn.getAttribute("aria-label") || "";
-      const icon =
-        btn.querySelector("mat-icon")?.innerText || "";
+      document.querySelectorAll("button[aria-label='Next page']")
+    )
+      .filter(isVisible)
+      .filter(btn => {
+        const disabled =
+          btn.disabled ||
+          btn.getAttribute("disabled") !== null ||
+          btn.getAttribute("aria-disabled") === "true" ||
+          btn.classList.contains("mat-button-disabled") ||
+          btn.classList.contains("mat-mdc-button-disabled") ||
+          Boolean(
+            btn.closest(
+              ".mat-button-disabled,.mat-mdc-button-disabled"
+            )
+          );
 
-      const disabled =
-        btn.disabled ||
-        btn.getAttribute("aria-disabled") === "true";
+        if (disabled) return false;
 
-      return (
-        (
-          label.includes("Next page") ||
-          icon.includes("chevron_right")
-        ) &&
-        !disabled
-      );
-    });
+        const rect = btn.getBoundingClientRect();
+        const centreX = rect.left + rect.width / 2;
+        const centreY = rect.top + rect.height / 2;
 
-    if (!nextButton) {
-      console.log("QC Next button not found or disabled.");
-      break;
-    }
+        return (
+          centreX >= rootRect.left &&
+          centreX <= rootRect.right &&
+          centreY >= rootRect.top &&
+          centreY <= rootRect.bottom
+        );
+      })
+      .find(Boolean);
 
-    const oldPageText = cleanText(
-      (getPreviewRoot() || pageRoot).innerText ||
-      (getPreviewRoot() || pageRoot).textContent ||
-      ""
+    if (!nextButton) break;
+
+    const paginator =
+      nextButton.closest(
+        "mat-paginator,.mat-mdc-paginator,.mat-paginator,[class*='paginator']"
+      ) || nextButton.parentElement?.parentElement;
+
+    const beforeRange = compactText(
+      paginator?.innerText || paginator?.textContent || ""
     );
 
-    // Old working build used one native click.
+    const pageState = `${beforeRange}|${current.questions
+      .map(q => q.qno)
+      .join(",")}`;
+
+    if (seenPageStates.has(pageState)) break;
+    seenPageStates.add(pageState);
+
     nextButton.click();
 
-    console.log("QC clicked next page");
+    let pageChanged = false;
 
-    await sleep(2000);
+    for (let attempt = 0; attempt < 16; attempt++) {
+      await sleep(500);
 
-    const newRoot = getPreviewRoot() || pageRoot;
-    const newPageText = cleanText(
-      newRoot.innerText ||
-      newRoot.textContent ||
-      ""
-    );
+      const afterRange = compactText(
+        paginator?.innerText || paginator?.textContent || ""
+      );
 
-    if (newPageText === oldPageText) {
-      console.log("QC page did not change after next click.");
-      break;
+      if (afterRange && afterRange !== beforeRange) {
+        pageChanged = true;
+        break;
+      }
+
+      const afterRoot = getPreviewRoot() || pageRoot;
+      const afterCurrent = extractQuestions(afterRoot, options);
+
+      const beforeSignature = current.questions
+        .map(q => `${q.qno}:${compactText(q.question).slice(0, 100)}`)
+        .join("|");
+
+      const afterSignature = afterCurrent.questions
+        .map(q => `${q.qno}:${compactText(q.question).slice(0, 100)}`)
+        .join("|");
+
+      if (afterSignature && afterSignature !== beforeSignature) {
+        pageChanged = true;
+        break;
+      }
     }
+
+    if (!pageChanged) break;
   }
 
-  allQuestions.sort(
-    (a, b) => Number(a.qno) - Number(b.qno)
-  );
-
-  console.log(
-    "QC total scanned questions:",
-    allQuestions.length
-  );
+  allQuestions.sort((a, b) => Number(a.qno) - Number(b.qno));
 
   return {
     questions: allQuestions,
