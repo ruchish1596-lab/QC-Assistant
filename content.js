@@ -1,6 +1,6 @@
-console.log("QC Assistant DEV3.3 Test Name Suffix Fix Loaded");
+console.log("QC Assistant DEV3.3 Edit Test Single Click Fix Loaded");
 
-const QC_VERSION = "3.0.3-dev3-test-name-suffix-fix";
+const QC_VERSION = "3.0.3-dev3-edit-test-single-click-fix";
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function cleanText(text = "") {
@@ -1506,13 +1506,15 @@ async function openEditTest() {
     });
   } catch {}
 
-  await sleep(300);
+  await sleep(400);
 
   try {
     targetButton.focus();
   } catch {}
 
-  robustClick(targetButton);
+  // Single click only. Multiple synthetic clicks were opening
+  // and immediately closing the Angular Material menu.
+  targetButton.click();
   await sleep(1200);
 
   const menuPane = Array.from(
@@ -1535,7 +1537,9 @@ async function openEditTest() {
   if (!menuPane) {
     window.__QC_LAST_MENU_TEXTS__ = [
       `Action menu did not open for exact test: ${
-        window.__QC_MANUAL_TEST_NAME__ || "-"
+        window.__QC_MANUAL_TEST_NAME__ ||
+        window.__QC_TARGET_TEST_TITLE__ ||
+        "selected test"
       }`
     ];
     return false;
@@ -1563,7 +1567,8 @@ async function openEditTest() {
     return false;
   }
 
-  robustClick(editItem);
+  // Single native click here as well.
+  editItem.click();
   await sleep(2800);
 
   const saveNextButton = Array.from(
@@ -1583,7 +1588,7 @@ async function openEditTest() {
     });
 
   if (saveNextButton) {
-    robustClick(saveNextButton);
+    saveNextButton.click();
     await sleep(2800);
   }
 
