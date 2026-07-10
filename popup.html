@@ -7,7 +7,7 @@
     body { width: 430px; margin: 0; padding: 18px; font-family: Arial, sans-serif; background: #fff3f8; color: #111827; }
     h2 { margin: 0 0 16px; text-align: center; color: #111827; }
     label { display: block; margin-top: 12px; font-weight: 600; font-size: 13px; }
-    input[type="email"], input[type="number"], input[type="file"] { width: 100%; box-sizing: border-box; margin-top: 6px; padding: 9px; border-radius: 8px; border: 1px solid #ddd; background: #fff; }
+    input[type="email"], input[type="text"], input[type="number"], input[type="file"] { width: 100%; box-sizing: border-box; margin-top: 6px; padding: 9px; border-radius: 8px; border: 1px solid #ddd; background: #fff; }
     .row { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; }
     #emailError { display: none; margin-top: 6px; color: #dc2626; font-size: 12px; }
     #runQC { width: 100%; margin-top: 18px; padding: 14px; border: 0; border-radius: 12px; background: #ff3c86; color: #fff; font-weight: 700; font-size: 18px; cursor: pointer; }
@@ -22,6 +22,14 @@
   <label for="qcEmail">PW Email *</label>
   <input id="qcEmail" type="email" placeholder="name@pw.live">
   <div id="emailError">Enter valid PW email ending with @pw.live</div>
+
+
+  <label for="testName">Test Name (optional)</label>
+  <input
+    id="testName"
+    type="text"
+    placeholder="Exact test name from the Tests list"
+  >
 
   <label for="expectedCount">Expected Questions (optional)</label>
   <input id="expectedCount" type="number" placeholder="Optional manual count">
