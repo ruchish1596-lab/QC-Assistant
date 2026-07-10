@@ -1,6 +1,6 @@
-console.log("QC Assistant DEV3.3 Three Bugs Fixed Loaded");
+console.log("QC Assistant DEV3.3 Exact Test Name Fix Loaded");
 
-const QC_VERSION = "3.0.3-dev3-three-bugs-fixed";
+const QC_VERSION = "3.0.3-dev3-exact-test-name-fix";
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function cleanText(text = "") {
@@ -1321,15 +1321,17 @@ function normalizeTestTitle(text = "") {
 }
 
 function getTargetTestActionButton() {
-  const manualName = normalizeTestTitle(
+  const rawManualName = compactText(
     window.__QC_MANUAL_TEST_NAME__ || ""
   );
 
-  const previewName = normalizeTestTitle(
-    window.__QC_TARGET_TEST_TITLE__ || ""
-  );
+  const targetName = normalizeTestTitle(rawManualName);
 
-  const targetName = manualName || previewName;
+  if (!targetName) {
+    window.__QC_EDIT_ERROR__ =
+      "Manual Test Name is required to open Edit Test safely";
+    return null;
+  }
 
   const rows = Array.from(
     document.querySelectorAll(
@@ -1337,74 +1339,63 @@ function getTargetTestActionButton() {
     )
   ).filter(isVisible);
 
-  const candidates = rows
-    .map(row => {
-      const actionButton = Array.from(
-        row.querySelectorAll("button,[role='button']")
-      ).find(btn => {
-        const text = compactText(
-          btn.innerText || btn.textContent || ""
-        ).toLowerCase();
+  const exactMatches = [];
 
-        const icon = compactText(
-          btn.querySelector("mat-icon")?.innerText || ""
-        ).toLowerCase();
+  rows.forEach(row => {
+    const actionButton = Array.from(
+      row.querySelectorAll("button,[role='button']")
+    ).find(btn => {
+      const text = compactText(
+        btn.innerText || btn.textContent || ""
+      ).toLowerCase();
 
-        return text === "more_vert" || icon === "more_vert";
-      });
+      const icon = compactText(
+        btn.querySelector("mat-icon")?.innerText || ""
+      ).toLowerCase();
 
-      if (!actionButton) return null;
-
-      const rowText = normalizeTestTitle(
-        row.innerText || row.textContent || ""
-      );
-
-      let score = 0;
-
-      if (targetName && rowText.includes(targetName)) {
-        score += 100000;
-      }
-
-      if (targetName) {
-        const targetWords = new Set(
-          targetName.split(" ").filter(word => word.length > 2)
-        );
-
-        const rowWords = new Set(
-          rowText.split(" ").filter(word => word.length > 2)
-        );
-
-        score += [...targetWords]
-          .filter(word => rowWords.has(word))
-          .length * 100;
-      }
-
-      return {
-        button: actionButton,
-        rowText,
-        score,
-        top: row.getBoundingClientRect().top
-      };
-    })
-    .filter(Boolean)
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      return a.top - b.top;
+      return text === "more_vert" || icon === "more_vert";
     });
 
-  if (!targetName) {
-    return candidates[0]?.button || null;
-  }
+    if (!actionButton) return;
 
-  const best = candidates[0];
+    const cells = Array.from(
+      row.querySelectorAll(
+        "td, mat-cell, .mat-cell, .mat-mdc-cell, [role='cell']"
+      )
+    ).filter(isVisible);
 
-  if (!best || best.score <= 0) {
+    const exactCell = cells.find(cell => {
+      const cellText = normalizeTestTitle(
+        cell.innerText || cell.textContent || ""
+      );
+
+      return cellText === targetName;
+    });
+
+    if (exactCell) {
+      exactMatches.push({
+        button: actionButton,
+        row,
+        cellText: compactText(
+          exactCell.innerText || exactCell.textContent || ""
+        )
+      });
+    }
+  });
+
+  if (exactMatches.length === 0) {
     window.__QC_EDIT_ERROR__ =
-      `Test row not found for: ${window.__QC_MANUAL_TEST_NAME__ || window.__QC_TARGET_TEST_TITLE__ || "-"}`;
+      `Exact test row not found for: ${rawManualName}`;
     return null;
   }
 
-  return best.button;
+  if (exactMatches.length > 1) {
+    window.__QC_EDIT_ERROR__ =
+      `Multiple exact test rows found for: ${rawManualName}`;
+    return null;
+  }
+
+  return exactMatches[0].button;
 }
 
 async function closePreview() {
@@ -1489,16 +1480,25 @@ async function openEditTest() {
 
   if (!targetButton) {
     window.__QC_LAST_MENU_TEXTS__ = [
-      window.__QC_EDIT_ERROR__ || "Target test row not found"
+      window.__QC_EDIT_ERROR__ || "Exact test row not found"
     ];
     return false;
   }
 
   try {
+    targetButton.scrollIntoView({
+      block: "center",
+      inline: "nearest"
+    });
+  } catch {}
+
+  await sleep(300);
+
+  try {
     targetButton.focus();
   } catch {}
 
-  targetButton.click();
+  robustClick(targetButton);
   await sleep(1200);
 
   const menuPane = Array.from(
@@ -1520,18 +1520,12 @@ async function openEditTest() {
 
   if (!menuPane) {
     window.__QC_LAST_MENU_TEXTS__ = [
-      `Action menu did not open for: ${
-        window.__QC_MANUAL_TEST_NAME__ ||
-        window.__QC_TARGET_TEST_TITLE__ ||
-        "selected test"
+      `Action menu did not open for exact test: ${
+        window.__QC_MANUAL_TEST_NAME__ || "-"
       }`
     ];
     return false;
   }
-
-  window.__QC_LAST_MENU_TEXTS__ = [
-    compactText(menuPane.innerText || menuPane.textContent || "")
-  ];
 
   const editItem = Array.from(
     menuPane.querySelectorAll(
@@ -1539,20 +1533,23 @@ async function openEditTest() {
     )
   )
     .filter(isVisible)
-    .find(el =>
-      /edit\s*test/i.test(
-        compactText(el.innerText || el.textContent || "")
-      )
-    );
+    .find(el => {
+      const itemText = compactText(
+        el.innerText || el.textContent || ""
+      );
+
+      return /^edit\s*test$/i.test(itemText) ||
+        /edit\s*test/i.test(itemText);
+    });
 
   if (!editItem) {
     window.__QC_LAST_MENU_TEXTS__ = [
-      "Edit Test option not found in opened menu"
+      "Edit Test option not found in the exact test menu"
     ];
     return false;
   }
 
-  editItem.click();
+  robustClick(editItem);
   await sleep(2800);
 
   const saveNextButton = Array.from(
@@ -1561,18 +1558,18 @@ async function openEditTest() {
     )
   )
     .filter(isVisible)
-    .find(el =>
-      /save\s*&\s*next/i.test(
-        compactText(
-          `${el.innerText || el.textContent || ""} ${
-            el.getAttribute("aria-label") || ""
-          }`
-        )
-      )
-    );
+    .find(el => {
+      const buttonText = compactText(
+        `${el.innerText || el.textContent || ""} ${
+          el.getAttribute("aria-label") || ""
+        }`
+      );
+
+      return /save\s*&\s*next/i.test(buttonText);
+    });
 
   if (saveNextButton) {
-    saveNextButton.click();
+    robustClick(saveNextButton);
     await sleep(2800);
   }
 
