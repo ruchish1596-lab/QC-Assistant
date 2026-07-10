@@ -1,6 +1,6 @@
-console.log("QC Assistant DEV3.3 Issues Fixed Loaded");
+console.log("QC Assistant DEV3.3 Manual Test Name Loaded");
 
-const QC_VERSION = "3.0.3-dev3-issues-fixed";
+const QC_VERSION = "3.0.3-dev3-manual-test-name";
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function cleanText(text = "") {
@@ -1024,35 +1024,70 @@ function normalizeTestTitle(text = "") {
 }
 
 function getTargetTestActionButton() {
-  const title = normalizeTestTitle(window.__QC_TARGET_TEST_TITLE__ || "");
+  const manualName = normalizeTestTitle(
+    window.__QC_MANUAL_TEST_NAME__ || ""
+  );
 
-  const rows = Array.from(document.querySelectorAll(
-    "tr, mat-row, .mat-row, .mat-mdc-row, [role='row']"
-  )).filter(isVisible);
+  const previewName = normalizeTestTitle(
+    window.__QC_TARGET_TEST_TITLE__ || ""
+  );
 
-  const rowCandidates = rows
+  const targetName = manualName || previewName;
+
+  const rows = Array.from(
+    document.querySelectorAll(
+      "tr, mat-row, .mat-row, .mat-mdc-row, [role='row']"
+    )
+  ).filter(isVisible);
+
+  const candidates = rows
     .map(row => {
-      const button = Array.from(row.querySelectorAll("button,[role='button']"))
-        .find(btn => {
-          const text = compactText(btn.innerText || btn.textContent || "").toLowerCase();
-          const icon = compactText(btn.querySelector("mat-icon")?.innerText || "").toLowerCase();
-          return text === "more_vert" || icon === "more_vert";
-        });
+      const actionButton = Array.from(
+        row.querySelectorAll("button,[role='button']")
+      ).find(btn => {
+        const text = compactText(
+          btn.innerText || btn.textContent || ""
+        ).toLowerCase();
 
-      if (!button) return null;
+        const icon = compactText(
+          btn.querySelector("mat-icon")?.innerText || ""
+        ).toLowerCase();
 
-      const rowText = normalizeTestTitle(row.innerText || row.textContent || "");
+        return text === "more_vert" || icon === "more_vert";
+      });
+
+      if (!actionButton) return null;
+
+      const rowText = normalizeTestTitle(
+        row.innerText || row.textContent || ""
+      );
+
       let score = 0;
 
-      if (title && rowText.includes(title)) score += 10000;
-
-      if (title) {
-        const titleWords = new Set(title.split(" ").filter(word => word.length > 2));
-        const rowWords = new Set(rowText.split(" ").filter(word => word.length > 2));
-        score += [...titleWords].filter(word => rowWords.has(word)).length * 100;
+      if (targetName && rowText.includes(targetName)) {
+        score += 100000;
       }
 
-      return { button, score, top: row.getBoundingClientRect().top };
+      if (targetName) {
+        const targetWords = new Set(
+          targetName.split(" ").filter(word => word.length > 2)
+        );
+
+        const rowWords = new Set(
+          rowText.split(" ").filter(word => word.length > 2)
+        );
+
+        score += [...targetWords]
+          .filter(word => rowWords.has(word))
+          .length * 100;
+      }
+
+      return {
+        button: actionButton,
+        rowText,
+        score,
+        top: row.getBoundingClientRect().top
+      };
     })
     .filter(Boolean)
     .sort((a, b) => {
@@ -1060,12 +1095,19 @@ function getTargetTestActionButton() {
       return a.top - b.top;
     });
 
-  if (title && rowCandidates[0]?.score > 0) {
-    return rowCandidates[0].button;
+  if (!targetName) {
+    return candidates[0]?.button || null;
   }
 
-  // Safe fallback: only first visible test row, never loop through every row.
-  return rowCandidates[0]?.button || null;
+  const best = candidates[0];
+
+  if (!best || best.score <= 0) {
+    window.__QC_EDIT_ERROR__ =
+      `Test row not found for: ${window.__QC_MANUAL_TEST_NAME__ || window.__QC_TARGET_TEST_TITLE__ || "-"}`;
+    return null;
+  }
+
+  return best.button;
 }
 
 async function closePreview() {
@@ -1149,12 +1191,18 @@ async function openEditTest() {
   const targetButton = getTargetTestActionButton();
 
   if (!targetButton) {
-    window.__QC_LAST_MENU_TEXTS__ = ["Target test row not found"];
+    window.__QC_LAST_MENU_TEXTS__ = [
+      window.__QC_EDIT_ERROR__ || "Target test row not found"
+    ];
     return false;
   }
 
-  robustClick(targetButton);
-  await sleep(1000);
+  try {
+    targetButton.focus();
+  } catch {}
+
+  targetButton.click();
+  await sleep(1200);
 
   const menuPane = Array.from(
     document.querySelectorAll(
@@ -1163,7 +1211,10 @@ async function openEditTest() {
   )
     .filter(isVisible)
     .find(el => {
-      const menuText = compactText(el.innerText || el.textContent || "");
+      const menuText = compactText(
+        el.innerText || el.textContent || ""
+      );
+
       return (
         menuText.includes("Preview Test & Questions") &&
         menuText.includes("Edit Test")
@@ -1171,7 +1222,13 @@ async function openEditTest() {
     });
 
   if (!menuPane) {
-    window.__QC_LAST_MENU_TEXTS__ = ["Test action menu did not open"];
+    window.__QC_LAST_MENU_TEXTS__ = [
+      `Action menu did not open for: ${
+        window.__QC_MANUAL_TEST_NAME__ ||
+        window.__QC_TARGET_TEST_TITLE__ ||
+        "selected test"
+      }`
+    ];
     return false;
   }
 
@@ -1180,7 +1237,9 @@ async function openEditTest() {
   ];
 
   const editItem = Array.from(
-    menuPane.querySelectorAll("button,[role='menuitem'],a")
+    menuPane.querySelectorAll(
+      "button,[role='menuitem'],a"
+    )
   )
     .filter(isVisible)
     .find(el =>
@@ -1189,13 +1248,20 @@ async function openEditTest() {
       )
     );
 
-  if (!editItem) return false;
+  if (!editItem) {
+    window.__QC_LAST_MENU_TEXTS__ = [
+      "Edit Test option not found in opened menu"
+    ];
+    return false;
+  }
 
-  robustClick(editItem);
-  await sleep(2600);
+  editItem.click();
+  await sleep(2800);
 
   const saveNextButton = Array.from(
-    document.querySelectorAll("button,[role='button'],a")
+    document.querySelectorAll(
+      "button,[role='button'],a"
+    )
   )
     .filter(isVisible)
     .find(el =>
@@ -1209,8 +1275,8 @@ async function openEditTest() {
     );
 
   if (saveNextButton) {
-    robustClick(saveNextButton);
-    await sleep(2600);
+    saveNextButton.click();
+    await sleep(2800);
   }
 
   return Boolean(getEditRoot());
@@ -1458,6 +1524,10 @@ function getRequestEmail(options = {}) {
 async function runDev3Flow(options = {}) {
   const rows = [];
   const email = getRequestEmail(options);
+
+  window.__QC_MANUAL_TEST_NAME__ = compactText(
+    options.manualTestName || options.testName || ""
+  );
 
   if (!isPwLiveEmail(email)) {
     rows.push(reportRow({
