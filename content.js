@@ -1,6 +1,6 @@
-console.log("QC Assistant DEV3.3 Fixed Loaded");
+console.log("QC Assistant DEV3.3 Issues Fixed Loaded");
 
-const QC_VERSION = "3.0.3-dev3-fixed";
+const QC_VERSION = "3.0.3-dev3-issues-fixed";
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function cleanText(text = "") {
@@ -486,12 +486,16 @@ function extractQuestions(root, options = {}) {
       addWarning("W001", "Options Count", `Options count is ${opts.length}, expected exactly 4`);
     }
 
-    if (options.videoRequired === true && videoStatus === "Missing") {
-      addWarning("W002", "Video Solution", "Video solution missing while video checkbox is ON");
-    }
+    // Video warning is generated only after Edit Test configuration is read.
 
-    if (questionText.length > 0 && questionText.length < 10) {
-      addWarning("W004", "Question Text", "Question text too short / image-based question");
+    const hasQuestionImage = Boolean(contentEl?.querySelector("img"));
+
+    if (
+      questionText.length > 0 &&
+      questionText.length < 10 &&
+      !hasQuestionImage
+    ) {
+      addWarning("W004", "Question Text", "Question text too short");
     }
 
     imageWarnings(contentEl).forEach(msg => addWarning("W006", "Image Quality", msg));
@@ -998,16 +1002,92 @@ function clickVisibleButtonByText(textPatterns, root = document) {
   return true;
 }
 
+function getPreviewTestTitle() {
+  const root = getPreviewRoot();
+  if (!root) return "";
+
+  const lines = String(root.innerText || root.textContent || "")
+    .split("\n")
+    .map(line => compactText(line))
+    .filter(Boolean)
+    .filter(line => line.toLowerCase() !== "close");
+
+  return lines[0] || "";
+}
+
+function normalizeTestTitle(text = "") {
+  return compactText(text)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getTargetTestActionButton() {
+  const title = normalizeTestTitle(window.__QC_TARGET_TEST_TITLE__ || "");
+
+  const rows = Array.from(document.querySelectorAll(
+    "tr, mat-row, .mat-row, .mat-mdc-row, [role='row']"
+  )).filter(isVisible);
+
+  const rowCandidates = rows
+    .map(row => {
+      const button = Array.from(row.querySelectorAll("button,[role='button']"))
+        .find(btn => {
+          const text = compactText(btn.innerText || btn.textContent || "").toLowerCase();
+          const icon = compactText(btn.querySelector("mat-icon")?.innerText || "").toLowerCase();
+          return text === "more_vert" || icon === "more_vert";
+        });
+
+      if (!button) return null;
+
+      const rowText = normalizeTestTitle(row.innerText || row.textContent || "");
+      let score = 0;
+
+      if (title && rowText.includes(title)) score += 10000;
+
+      if (title) {
+        const titleWords = new Set(title.split(" ").filter(word => word.length > 2));
+        const rowWords = new Set(rowText.split(" ").filter(word => word.length > 2));
+        score += [...titleWords].filter(word => rowWords.has(word)).length * 100;
+      }
+
+      return { button, score, top: row.getBoundingClientRect().top };
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.top - b.top;
+    });
+
+  if (title && rowCandidates[0]?.score > 0) {
+    return rowCandidates[0].button;
+  }
+
+  // Safe fallback: only first visible test row, never loop through every row.
+  return rowCandidates[0]?.button || null;
+}
+
 async function closePreview() {
+  window.__QC_TARGET_TEST_TITLE__ = getPreviewTestTitle();
+
   const closeCandidates = Array.from(document.querySelectorAll(
     "button[aria-label='Close'],button[aria-label='close'],button[mat-dialog-close],.mat-dialog-close,.mat-mdc-dialog-close,button"
   ))
     .filter(isVisible)
     .map(btn => {
-      const text = compactText(`${btn.innerText || ""} ${btn.getAttribute("aria-label") || ""} ${btn.getAttribute("title") || ""}`).toLowerCase();
-      const icon = compactText(btn.querySelector("mat-icon")?.innerText || "").toLowerCase();
+      const text = compactText(
+        `${btn.innerText || ""} ${btn.getAttribute("aria-label") || ""} ${btn.getAttribute("title") || ""}`
+      ).toLowerCase();
+
+      const icon = compactText(
+        btn.querySelector("mat-icon")?.innerText || ""
+      ).toLowerCase();
+
       const inPreviewDialog = Boolean(
-        btn.closest("mat-dialog-container,.mat-mdc-dialog-container,.cdk-overlay-pane,[role='dialog']")?.querySelector("mat-card-title")
+        btn.closest(
+          "mat-dialog-container,.mat-mdc-dialog-container,.cdk-overlay-pane,[role='dialog']"
+        )?.querySelector("mat-card-title")
       );
 
       let score = 0;
@@ -1018,18 +1098,25 @@ async function closePreview() {
 
       return { btn, score };
     })
-    .filter(x => x.score > 0)
+    .filter(item => item.score > 0)
     .sort((a, b) => b.score - a.score);
 
   if (closeCandidates[0]) {
     robustClick(closeCandidates[0].btn);
     await sleep(1200);
+
     if (!getPreviewRoot()) return true;
   }
 
-  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
-  await sleep(1200);
+  document.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: "Escape",
+      code: "Escape",
+      bubbles: true
+    })
+  );
 
+  await sleep(1200);
   return !getPreviewRoot();
 }
 
@@ -1059,74 +1146,74 @@ async function openEditTest() {
     await sleep(1200);
   }
 
-  const rowButtons = getTestRowActionButtons();
+  const targetButton = getTargetTestActionButton();
 
-  for (const button of rowButtons) {
-    robustClick(button);
-    await sleep(900);
-
-    const menuPane = Array.from(
-      document.querySelectorAll(
-        ".cdk-overlay-pane,.mat-menu-panel,.mat-mdc-menu-panel,[role='menu']"
-      )
-    )
-      .filter(isVisible)
-      .find(el => {
-        const menuText = compactText(el.innerText || el.textContent || "");
-        return (
-          menuText.includes("Preview Test & Questions") &&
-          menuText.includes("Edit Test")
-        );
-      });
-
-    if (!menuPane) {
-      document.dispatchEvent(new KeyboardEvent("keydown", {
-        key: "Escape",
-        code: "Escape",
-        bubbles: true
-      }));
-      await sleep(400);
-      continue;
-    }
-
-    const editItem = Array.from(
-      menuPane.querySelectorAll("button,[role='menuitem'],a")
-    )
-      .filter(isVisible)
-      .find(el =>
-        /edit\s*test/i.test(
-          compactText(el.innerText || el.textContent || "")
-        )
-      );
-
-    if (!editItem) continue;
-
-    robustClick(editItem);
-    await sleep(2600);
-
-    const saveNextButton = Array.from(
-      document.querySelectorAll("button,[role='button'],a")
-    )
-      .filter(isVisible)
-      .find(el =>
-        /save\s*&\s*next/i.test(
-          compactText(
-            `${el.innerText || el.textContent || ""} ${
-              el.getAttribute("aria-label") || ""
-            }`
-          )
-        )
-      );
-
-    if (saveNextButton) {
-      robustClick(saveNextButton);
-      await sleep(2600);
-    }
-
-    return Boolean(getEditRoot());
+  if (!targetButton) {
+    window.__QC_LAST_MENU_TEXTS__ = ["Target test row not found"];
+    return false;
   }
 
-  return false;
+  robustClick(targetButton);
+  await sleep(1000);
+
+  const menuPane = Array.from(
+    document.querySelectorAll(
+      ".cdk-overlay-pane,.mat-menu-panel,.mat-mdc-menu-panel,[role='menu']"
+    )
+  )
+    .filter(isVisible)
+    .find(el => {
+      const menuText = compactText(el.innerText || el.textContent || "");
+      return (
+        menuText.includes("Preview Test & Questions") &&
+        menuText.includes("Edit Test")
+      );
+    });
+
+  if (!menuPane) {
+    window.__QC_LAST_MENU_TEXTS__ = ["Test action menu did not open"];
+    return false;
+  }
+
+  window.__QC_LAST_MENU_TEXTS__ = [
+    compactText(menuPane.innerText || menuPane.textContent || "")
+  ];
+
+  const editItem = Array.from(
+    menuPane.querySelectorAll("button,[role='menuitem'],a")
+  )
+    .filter(isVisible)
+    .find(el =>
+      /edit\s*test/i.test(
+        compactText(el.innerText || el.textContent || "")
+      )
+    );
+
+  if (!editItem) return false;
+
+  robustClick(editItem);
+  await sleep(2600);
+
+  const saveNextButton = Array.from(
+    document.querySelectorAll("button,[role='button'],a")
+  )
+    .filter(isVisible)
+    .find(el =>
+      /save\s*&\s*next/i.test(
+        compactText(
+          `${el.innerText || el.textContent || ""} ${
+            el.getAttribute("aria-label") || ""
+          }`
+        )
+      )
+    );
+
+  if (saveNextButton) {
+    robustClick(saveNextButton);
+    await sleep(2600);
+  }
+
+  return Boolean(getEditRoot());
 }
 
 function readEditConfig(scannedCount) {
