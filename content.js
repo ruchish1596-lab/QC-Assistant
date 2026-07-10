@@ -1,6 +1,6 @@
-console.log("QC Assistant DEV3.3 Multilingual Validation Loaded");
+console.log("QC Assistant DEV3.3 Three Bugs Fixed Loaded");
 
-const QC_VERSION = "3.0.3-dev3-multilingual-validation";
+const QC_VERSION = "3.0.3-dev3-three-bugs-fixed";
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function cleanText(text = "") {
@@ -569,7 +569,8 @@ async function scanPreview(options = {}) {
       questions: [],
       reportRows: [],
       imagesFound: 0,
-      previewChecked: false
+      previewChecked: false,
+      instructionsText: ""
     };
   }
 
@@ -578,6 +579,11 @@ async function scanPreview(options = {}) {
   const seenQuestionKeys = new Set();
   const seenPageSignatures = new Set();
   const maxPages = 100;
+
+  // Save Preview/General Instructions text before closing the modal.
+  const instructionsText = cleanText(
+    firstRoot.innerText || firstRoot.textContent || ""
+  );
 
   for (let page = 1; page <= maxPages; page++) {
     const pageRoot = getPreviewRoot() || firstRoot;
@@ -603,27 +609,22 @@ async function scanPreview(options = {}) {
 
     rows.push(...current.reportRows);
 
-    const nextButton = Array.from(
+    const nextButtons = Array.from(
       document.querySelectorAll("button[aria-label='Next page']")
     )
       .filter(isVisible)
       .filter(btn => {
-        const disabled =
+        return !(
           btn.disabled ||
           btn.getAttribute("disabled") !== null ||
           btn.getAttribute("aria-disabled") === "true" ||
           btn.classList.contains("mat-button-disabled") ||
-          btn.classList.contains("mat-mdc-button-disabled");
-
-        if (disabled) return false;
-
-        const dialog = btn.closest(
-          "mat-dialog-container,.mat-mdc-dialog-container,.cdk-overlay-pane,[role='dialog']"
+          btn.classList.contains("mat-mdc-button-disabled")
         );
+      });
 
-        return Boolean(dialog?.querySelector("mat-card-title"));
-      })
-      .pop();
+    // Background paginator appears first; Preview paginator appears last.
+    const nextButton = nextButtons[nextButtons.length - 1];
 
     if (!nextButton) break;
 
@@ -655,8 +656,9 @@ async function scanPreview(options = {}) {
   return {
     questions: allQuestions,
     reportRows: rows,
-    imagesFound: (getPreviewRoot() || firstRoot).querySelectorAll("img").length,
-    previewChecked: true
+    imagesFound: firstRoot.querySelectorAll("img").length,
+    previewChecked: true,
+    instructionsText
   };
 }
 
@@ -1577,7 +1579,7 @@ async function openEditTest() {
   return Boolean(getEditRoot());
 }
 
-function readEditConfig(scannedCount) {
+function readEditConfig(scannedCount, instructionsText = "", options = {}) {
   const rows = [];
   const root = getEditRoot();
 
@@ -1596,7 +1598,8 @@ function readEditConfig(scannedCount) {
     };
   }
 
-  const text = cleanText(root.innerText || root.textContent || "");
+  const editText = cleanText(root.innerText || root.textContent || "");
+  const instructionSource = cleanText(instructionsText || "");
 
   const totalQuestions = getNumberByLabel(
     root,
@@ -1618,10 +1621,12 @@ function readEditConfig(scannedCount) {
 
   const allowSubmit = getCheckboxState(root, "Allow Submit");
 
-  const disableVideo = getCheckboxState(root, "Disable Video Solution");
-  const videoRequired = disableVideo === false;
+  // Only the popup checkbox decides whether video warnings are required.
+  const videoRequired =
+    options.hasVideoSolutions === true ||
+    options.videoRequired === true;
 
-  const syllabus = syllabusStatus(text);
+  const syllabus = syllabusStatus(editText);
 
   if (allowSubmit === false) {
     rows.push(reportRow({
@@ -1691,7 +1696,7 @@ function readEditConfig(scannedCount) {
     }));
   }
 
-  const instructionDurations = findDurations(text);
+  const instructionDurations = findDurations(instructionSource);
 
   if (instructionDurations.length === 0) {
     rows.push(reportRow({
@@ -1719,7 +1724,7 @@ function readEditConfig(scannedCount) {
   }
 
   const instructionQuestionCounts =
-    findInstructionQuestionCounts(text);
+    findInstructionQuestionCounts(instructionSource);
 
   if (
     totalQuestions !== null &&
@@ -1738,7 +1743,7 @@ function readEditConfig(scannedCount) {
   }
 
   const instructionTotalMarks =
-    findInstructionTotalMarks(text);
+    findInstructionTotalMarks(instructionSource);
 
   if (
     totalMarks !== null &&
@@ -1946,7 +1951,7 @@ async function runDev3Flow(options = {}) {
   };
 
   if (editOpened) {
-    const edit = readEditConfig(preview.questions.length);
+    const edit = readEditConfig(preview.questions.length, preview.instructionsText, options);
     config = edit.config;
     rows.push(...edit.rows);
     await closeEditTest();
