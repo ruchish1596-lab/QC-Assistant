@@ -565,6 +565,47 @@ function findNextButton(root) {
 
 
 
+function getPreviewImageSectionFlags(root) {
+  if (!root) {
+    return {
+      instructionsImageBased: false,
+      syllabusImageBased: false
+    };
+  }
+
+  const firstQuestionTitle = Array.from(
+    root.querySelectorAll("mat-card-title")
+  ).find(isVisible);
+
+  const firstQuestionTop =
+    firstQuestionTitle?.getBoundingClientRect().top ??
+    Number.POSITIVE_INFINITY;
+
+  const topImages = Array.from(root.querySelectorAll("img"))
+    .filter(isVisible)
+    .filter(img => img.getBoundingClientRect().top < firstQuestionTop);
+
+  if (!topImages.length) {
+    return {
+      instructionsImageBased: false,
+      syllabusImageBased: false
+    };
+  }
+
+  const value = cleanText(
+    root.innerText || root.textContent || ""
+  ).toLowerCase();
+
+  return {
+    instructionsImageBased:
+      value.includes("general instructions") ||
+      value.includes("test instructions") ||
+      value.includes("instructions"),
+    syllabusImageBased:
+      value.includes("syllabus")
+  };
+}
+
 async function scanPreview(options = {}) {
   const firstRoot = getPreviewRoot();
 
@@ -581,27 +622,22 @@ async function scanPreview(options = {}) {
   const allQuestions = [];
   const rows = [];
   const seenQuestionKeys = new Set();
-  const seenFirstTitles = new Set();
+  const seenPageStates = new Set();
   const maxPages = 100;
 
   const instructionsText = cleanText(
     firstRoot.innerText || firstRoot.textContent || ""
   );
 
+  const imageSectionFlags =
+    getPreviewImageSectionFlags(firstRoot);
+
   for (let page = 1; page <= maxPages; page++) {
     const pageRoot = getPreviewRoot() || firstRoot;
 
     await autoScrollRoot(pageRoot);
-    await sleep(700);
 
     const current = extractQuestions(pageRoot, options);
-
-    const firstTitle = compactText(
-      pageRoot.querySelector("mat-card-title")?.innerText || ""
-    );
-
-    if (firstTitle && seenFirstTitles.has(firstTitle)) break;
-    if (firstTitle) seenFirstTitles.add(firstTitle);
 
     current.questions.forEach(q => {
       const key = questionUniqueKey(q);
@@ -614,19 +650,32 @@ async function scanPreview(options = {}) {
 
     rows.push(...current.reportRows);
 
+    const pageSignature = current.questions
+      .map(q => `${q.qno}:${compactText(q.question).slice(0, 100)}`)
+      .join("|");
+
+    if (pageSignature && seenPageStates.has(pageSignature)) break;
+    if (pageSignature) seenPageStates.add(pageSignature);
+
+    // IMPORTANT:
+    // Search ONLY inside the Preview root.
+    // document-level search was selecting the background Tests paginator.
     const nextButton = Array.from(
       pageRoot.querySelectorAll(
-        "button[aria-label='Next page'],button.mat-paginator-navigation-next"
+        "button[aria-label='Next page'], button.mat-paginator-navigation-next"
       )
     )
       .filter(isVisible)
-      .find(btn => !(
-        btn.disabled ||
-        btn.getAttribute("disabled") !== null ||
-        btn.getAttribute("aria-disabled") === "true" ||
-        btn.classList.contains("mat-button-disabled") ||
-        btn.classList.contains("mat-mdc-button-disabled")
-      ));
+      .find(btn => {
+        const disabled =
+          btn.disabled ||
+          btn.getAttribute("disabled") !== null ||
+          btn.getAttribute("aria-disabled") === "true" ||
+          btn.classList.contains("mat-button-disabled") ||
+          btn.classList.contains("mat-mdc-button-disabled");
+
+        return !disabled;
+      });
 
     if (!nextButton) break;
 
@@ -634,18 +683,17 @@ async function scanPreview(options = {}) {
 
     let pageChanged = false;
 
-    for (let attempt = 0; attempt < 20; attempt++) {
+    for (let attempt = 0; attempt < 16; attempt++) {
       await sleep(500);
 
       const afterRoot = getPreviewRoot() || pageRoot;
-      const afterFirstTitle = compactText(
-        afterRoot.querySelector("mat-card-title")?.innerText || ""
-      );
+      const afterCurrent = extractQuestions(afterRoot, options);
 
-      if (
-        afterFirstTitle &&
-        afterFirstTitle !== firstTitle
-      ) {
+      const afterSignature = afterCurrent.questions
+        .map(q => `${q.qno}:${compactText(q.question).slice(0, 100)}`)
+        .join("|");
+
+      if (afterSignature && afterSignature !== pageSignature) {
         pageChanged = true;
         break;
       }
@@ -661,7 +709,11 @@ async function scanPreview(options = {}) {
     reportRows: rows,
     imagesFound: firstRoot.querySelectorAll("img").length,
     previewChecked: true,
-    instructionsText
+    instructionsText,
+    instructionsImageBased:
+      imageSectionFlags.instructionsImageBased,
+    syllabusImageBased:
+      imageSectionFlags.syllabusImageBased
   };
 }
 
@@ -1711,7 +1763,17 @@ function readEditConfig(scannedCount, instructionsText = "", options = {}) {
 
   const instructionDurations = findDurations(instructionSource);
 
-  if (instructionDurations.length === 0) {
+  if (options.instructionsImageBased === true) {
+    rows.push(reportRow({
+      priority: "Warning",
+      type: "Test",
+      qno: "-",
+      ruleId: "T004",
+      check: "Instructions",
+      status: "WARNING",
+      details: "Instructions are image-based; count could not be verified"
+    }));
+  } else if (instructionDurations.length === 0) {
     rows.push(reportRow({
       priority: "Warning",
       type: "Test",
@@ -1740,6 +1802,7 @@ function readEditConfig(scannedCount, instructionsText = "", options = {}) {
     findInstructionQuestionCounts(instructionSource);
 
   if (
+    options.instructionsImageBased !== true &&
     totalQuestions !== null &&
     instructionQuestionCounts.length > 0 &&
     !instructionQuestionCounts.includes(totalQuestions)
@@ -1759,6 +1822,7 @@ function readEditConfig(scannedCount, instructionsText = "", options = {}) {
     findInstructionTotalMarks(instructionSource);
 
   if (
+    options.instructionsImageBased !== true &&
     totalMarks !== null &&
     instructionTotalMarks.length > 0 &&
     !instructionTotalMarks.includes(totalMarks)
@@ -1774,7 +1838,20 @@ function readEditConfig(scannedCount, instructionsText = "", options = {}) {
     }));
   }
 
-  if (!syllabus.found || syllabus.missing) {
+  if (
+    options.syllabusImageBased === true &&
+    (!syllabus.found || syllabus.missing)
+  ) {
+    rows.push(reportRow({
+      priority: "Warning",
+      type: "Test",
+      qno: "-",
+      ruleId: "T005",
+      check: "Syllabus",
+      status: "WARNING",
+      details: "Syllabus is image-based; could not be verified"
+    }));
+  } else if (!syllabus.found || syllabus.missing) {
     rows.push(reportRow({
       priority: "Critical",
       type: "Test",
@@ -1964,7 +2041,17 @@ async function runDev3Flow(options = {}) {
   };
 
   if (editOpened) {
-    const edit = readEditConfig(preview.questions.length, preview.instructionsText, options);
+    const edit = readEditConfig(
+      preview.questions.length,
+      preview.instructionsText,
+      {
+        ...options,
+        instructionsImageBased:
+          preview.instructionsImageBased === true,
+        syllabusImageBased:
+          preview.syllabusImageBased === true
+      }
+    );
     config = edit.config;
     rows.push(...edit.rows);
     await closeEditTest();
