@@ -573,6 +573,13 @@ function getPreviewImageSectionFlags(root) {
     };
   }
 
+  const lines = cleanText(
+    root.innerText || root.textContent || ""
+  )
+    .split("\n")
+    .map(line => compactText(line))
+    .filter(Boolean);
+
   const firstQuestionTitle = Array.from(
     root.querySelectorAll("mat-card-title")
   ).find(isVisible);
@@ -592,17 +599,46 @@ function getPreviewImageSectionFlags(root) {
     };
   }
 
-  const value = cleanText(
-    root.innerText || root.textContent || ""
-  ).toLowerCase();
+  function getSectionText(startRegex, stopRegexes = []) {
+    const startIndex = lines.findIndex(line => startRegex.test(line));
+
+    if (startIndex === -1) return "";
+
+    const collected = [];
+
+    for (let i = startIndex + 1; i < lines.length; i++) {
+      const line = lines[i];
+
+      if (stopRegexes.some(regex => regex.test(line))) break;
+      if (/^\d+[\.)]\s*/.test(line)) break;
+
+      collected.push(line);
+    }
+
+    return compactText(collected.join(" "));
+  }
+
+  const instructionsText = getSectionText(
+    /^(general\s+instructions|test\s+instructions|instructions)\b/i,
+    [/^syllabus\b/i]
+  );
+
+  const syllabusText = getSectionText(
+    /^syllabus\b/i,
+    [/^general\s+instructions\b/i, /^test\s+instructions\b/i]
+  );
+
+  const instructionsImageBased =
+    topImages.length > 0 &&
+    instructionsText.length < 25;
+
+  const syllabusImageBased =
+    topImages.length > 0 &&
+    syllabusText.length < 25;
 
   return {
-    instructionsImageBased:
-      value.includes("general instructions") ||
-      value.includes("test instructions") ||
-      value.includes("instructions"),
-    syllabusImageBased:
-      value.includes("syllabus")
+    instructionsImageBased,
+    syllabusImageBased
   };
 }
 
