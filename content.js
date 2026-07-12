@@ -240,9 +240,8 @@ function getOptionLetter(text = "") {
 function getSolutionAnswer(text = "", options = []) {
   const raw = compactText(text);
 
-  if (/\banswer\s*:\s*[spdf]\s*block\b/i.test(raw)) {
-    return "";
-  }
+  if (!raw) return "";
+  if (/\banswer\s*:\s*[spdf]\s*block\b/i.test(raw)) return "";
 
   const numberToLetter = {
     "1": "A",
@@ -251,13 +250,40 @@ function getSolutionAnswer(text = "", options = []) {
     "4": "D"
   };
 
-  // 1) Explicit "Option A/B/C/D" formats.
+  // 1) Strong conclusion phrases only.
+  // These intentionally ignore lines like "Option A is incorrect".
+  const conclusionLetterPatterns = [
+    /\b(?:therefore|hence|thus|so)\s*,?\s*(?:the\s+)?(?:correct|most\s+appropriate|right|best)\s+answer\s+(?:is\s+)?(?:option\s*)?\(?([A-D])\)?\b/i,
+    /\b(?:therefore|hence|thus|so)\s*,?\s*option\s+\(?([A-D])\)?\b[^.]{0,120}\b(?:correct|appropriate|right|best)\b/i,
+    /\boption\s+\(?([A-D])\)?\b[^.]{0,120}\b(?:is|as)\s+(?:the\s+)?(?:correct|most\s+appropriate|right|best)\s+answer\b/i,
+    /\b(?:the\s+)?(?:correct|right|best|most\s+appropriate)\s+(?:answer|option)\s*(?:is|:)\s*(?:option\s*)?\(?([A-D])\)?\b/i,
+    /\banswer\s*(?:is|:)\s*(?:option\s*)?\(?([A-D])\)?\s*(?:[.)]|$)/i,
+    /\bans\s*:\s*\(?([A-D])\)?\s*(?:[.)]|$)/i
+  ];
+
+  for (const pattern of conclusionLetterPatterns) {
+    const match = raw.match(pattern);
+    if (match?.[1]) return match[1].toUpperCase();
+  }
+
+  // 2) "Solution (b)", "Answer (b)", "Correct answer (b)".
+  const bracketLetterPatterns = [
+    /\bsolution\s*\(\s*([A-D])\s*\)\s*[:\-]?/i,
+    /\banswer\s*\(\s*([A-D])\s*\)\s*[:\-]?/i,
+    /\bcorrect\s+answer\s*\(\s*([A-D])\s*\)\s*[:\-]?/i,
+    /\bsolution\s*[:\-]?\s*\(\s*([A-D])\s*\)/i
+  ];
+
+  for (const pattern of bracketLetterPatterns) {
+    const match = raw.match(pattern);
+    if (match?.[1]) return match[1].toUpperCase();
+  }
+
+  // 3) Explicit Option A/B/C/D after answer wording.
   const explicitOptionPatterns = [
-    /\boption\s*[:\-]?\s*([A-D])\b/i,
-    /\bcorrect\s+option\s*[:\-]?\s*([A-D])\b/i,
-    /\banswer\s+is\s+option\s*[:\-]?\s*([A-D])\b/i,
-    /\bcorrect\s+answer\s+is\s+option\s*[:\-]?\s*([A-D])\b/i,
-    /\bthe\s+correct\s+answer\s+is\s+option\s*[:\-]?\s*([A-D])\b/i
+    /\b(?:correct|right|best)\s+answer\s*(?:is|:)\s*option\s+\(?([A-D])\)?\b/i,
+    /\banswer\s*(?:is|:)\s*option\s+\(?([A-D])\)?\b/i,
+    /\bcorrect\s+option\s*(?:is|:)\s*\(?([A-D])\)?\b/i
   ];
 
   for (const pattern of explicitOptionPatterns) {
@@ -265,47 +291,29 @@ function getSolutionAnswer(text = "", options = []) {
     if (match?.[1]) return match[1].toUpperCase();
   }
 
-  // 2) Explicit numeric answer labels: 1/2/3/4.
-  const explicitNumberPatterns = [
-    /\bcorrect\s+answer\s*(?:is|:)\s*([1-4])\b/i,
-    /\banswer\s*(?:is|:)\s*([1-4])\b/i,
-    /\bans\s*:\s*([1-4])\b/i,
-    /\bcorrect\s+option\s*(?:is|:)\s*([1-4])\b/i
+  // 4) Numeric labels 1/2/3/4.
+  const numericPatterns = [
+    /\b(?:correct|right|best)\s+answer\s*(?:is|:)\s*\(?([1-4])\)?\b/i,
+    /\banswer\s*(?:is|:)\s*\(?([1-4])\)?\b/i,
+    /\bsolution\s*\(\s*([1-4])\s*\)\s*[:\-]?/i
   ];
 
-  for (const pattern of explicitNumberPatterns) {
+  for (const pattern of numericPatterns) {
     const match = raw.match(pattern);
     if (match?.[1]) return numberToLetter[match[1]] || "";
   }
 
-  // 3) Direct single-letter answer only when it is clearly isolated.
-  const isolatedLetterPatterns = [
-    /\bcorrect\s+answer\s*(?:is|:)\s*([A-D])\s*(?:[.)]|$)/i,
-    /\banswer\s*(?:is|:)\s*([A-D])\s*(?:[.)]|$)/i,
-    /\bans\s*:\s*([A-D])\s*(?:[.)]|$)/i
-  ];
-
-  for (const pattern of isolatedLetterPatterns) {
-    const match = raw.match(pattern);
-    if (match?.[1]) return match[1].toUpperCase();
-  }
-
-  // 4) Extract answer text after phrases such as:
-  // "Hence, the correct answer is: B, D, F, G and H"
+  // 5) Final answer text matched against actual option text.
   const answerTextPatterns = [
-    /\bhence\s*,?\s*the\s+correct\s+answer\s+is\s*:\s*(.+)$/i,
-    /\btherefore\s*,?\s*the\s+correct\s+answer\s+is\s*:\s*(.+)$/i,
-    /\bthe\s+correct\s+answer\s+is\s*:\s*(.+)$/i,
-    /\bcorrect\s+answer\s+is\s*:\s*(.+)$/i,
-    /\banswer\s+is\s*:\s*(.+)$/i,
-    /\banswer\s*:\s*(.+)$/i
+    /\b(?:therefore|hence|thus|so)\s*,?\s*(?:the\s+)?correct\s+answer\s+is\s*:\s*(.+)$/i,
+    /\b(?:the\s+)?correct\s+answer\s+is\s*:\s*(.+)$/i,
+    /\banswer\s+is\s*:\s*(.+)$/i
   ];
 
   let answerText = "";
 
   for (const pattern of answerTextPatterns) {
     const match = raw.match(pattern);
-
     if (match?.[1]) {
       answerText = compactText(match[1]);
       break;
@@ -320,7 +328,6 @@ function getSolutionAnswer(text = "", options = []) {
     return compactText(value)
       .toLowerCase()
       .replace(/^[a-d1-4][.)]\s*/i, "")
-      .replace(/\band\b/g, "and")
       .replace(/[,:;]+/g, " ")
       .replace(/[^\p{L}\p{N}\s]/gu, " ")
       .replace(/\s+/g, " ")
@@ -328,7 +335,6 @@ function getSolutionAnswer(text = "", options = []) {
   }
 
   const normalizedAnswer = normalizeAnswerText(answerText);
-
   if (!normalizedAnswer) return "";
 
   const exactMatch = options.find(option =>
