@@ -237,33 +237,105 @@ function getOptionLetter(text = "") {
   return match ? match[1].toUpperCase() : "";
 }
 
-function getSolutionAnswer(text = "") {
+function getSolutionAnswer(text = "", options = []) {
   const raw = compactText(text);
 
-  if (/\banswer\s*:\s*[spdf]\s*block\b/i.test(raw)) return "";
+  if (/\banswer\s*:\s*[spdf]\s*block\b/i.test(raw)) {
+    return "";
+  }
 
-  const patterns = [
-    /\boption\s+([A-D])\s+is\s+the\s+correct\s+answer\b/i,
-    /\boption\s+([A-D])\s+is\s+correct\b/i,
-    /\boption\s+([A-D])\s+is\s+right\b/i,
-    /\bhence[^.]{0,140}\boption\s+([A-D])\b[^.]{0,100}\bcorrect\s+answer\b/i,
-    /\btherefore[^.]{0,140}\boption\s+([A-D])\b[^.]{0,100}\bcorrect\s+answer\b/i,
-    /\bthe\s+correct\s+answer\s+is\s*:?\s*(?:option\s*)?([A-D])\b/i,
-    /\bcorrect\s+answer\s+is\s*:?\s*(?:option\s*)?([A-D])\b/i,
-    /\bright\s+answer\s+is\s*:?\s*(?:option\s*)?([A-D])\b/i,
-    /\banswer\s+is\s*:?\s*(?:option\s*)?([A-D])\b/i,
-    /\banswer\s*:\s*(?:option\s*)?([A-D])\b/i,
-    /\bans\s*:\s*(?:option\s*)?([A-D])\b/i,
-    /\bsolution\s+that\s+is\s+right\s+is\s*:?\s*(?:option\s*)?([A-D])\b/i,
-    /\bsolution\s+is\s*:?\s*(?:option\s*)?([A-D])\b/i
+  const numberToLetter = {
+    "1": "A",
+    "2": "B",
+    "3": "C",
+    "4": "D"
+  };
+
+  // 1) Explicit "Option A/B/C/D" formats.
+  const explicitOptionPatterns = [
+    /\boption\s*[:\-]?\s*([A-D])\b/i,
+    /\bcorrect\s+option\s*[:\-]?\s*([A-D])\b/i,
+    /\banswer\s+is\s+option\s*[:\-]?\s*([A-D])\b/i,
+    /\bcorrect\s+answer\s+is\s+option\s*[:\-]?\s*([A-D])\b/i,
+    /\bthe\s+correct\s+answer\s+is\s+option\s*[:\-]?\s*([A-D])\b/i
   ];
 
-  for (const pattern of patterns) {
+  for (const pattern of explicitOptionPatterns) {
     const match = raw.match(pattern);
     if (match?.[1]) return match[1].toUpperCase();
   }
 
-  return "";
+  // 2) Explicit numeric answer labels: 1/2/3/4.
+  const explicitNumberPatterns = [
+    /\bcorrect\s+answer\s*(?:is|:)\s*([1-4])\b/i,
+    /\banswer\s*(?:is|:)\s*([1-4])\b/i,
+    /\bans\s*:\s*([1-4])\b/i,
+    /\bcorrect\s+option\s*(?:is|:)\s*([1-4])\b/i
+  ];
+
+  for (const pattern of explicitNumberPatterns) {
+    const match = raw.match(pattern);
+    if (match?.[1]) return numberToLetter[match[1]] || "";
+  }
+
+  // 3) Direct single-letter answer only when it is clearly isolated.
+  const isolatedLetterPatterns = [
+    /\bcorrect\s+answer\s*(?:is|:)\s*([A-D])\s*(?:[.)]|$)/i,
+    /\banswer\s*(?:is|:)\s*([A-D])\s*(?:[.)]|$)/i,
+    /\bans\s*:\s*([A-D])\s*(?:[.)]|$)/i
+  ];
+
+  for (const pattern of isolatedLetterPatterns) {
+    const match = raw.match(pattern);
+    if (match?.[1]) return match[1].toUpperCase();
+  }
+
+  // 4) Extract answer text after phrases such as:
+  // "Hence, the correct answer is: B, D, F, G and H"
+  const answerTextPatterns = [
+    /\bhence\s*,?\s*the\s+correct\s+answer\s+is\s*:\s*(.+)$/i,
+    /\btherefore\s*,?\s*the\s+correct\s+answer\s+is\s*:\s*(.+)$/i,
+    /\bthe\s+correct\s+answer\s+is\s*:\s*(.+)$/i,
+    /\bcorrect\s+answer\s+is\s*:\s*(.+)$/i,
+    /\banswer\s+is\s*:\s*(.+)$/i,
+    /\banswer\s*:\s*(.+)$/i
+  ];
+
+  let answerText = "";
+
+  for (const pattern of answerTextPatterns) {
+    const match = raw.match(pattern);
+
+    if (match?.[1]) {
+      answerText = compactText(match[1]);
+      break;
+    }
+  }
+
+  if (!answerText || !Array.isArray(options) || !options.length) {
+    return "";
+  }
+
+  function normalizeAnswerText(value = "") {
+    return compactText(value)
+      .toLowerCase()
+      .replace(/^[a-d1-4][.)]\s*/i, "")
+      .replace(/\band\b/g, "and")
+      .replace(/[,:;]+/g, " ")
+      .replace(/[^\p{L}\p{N}\s]/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  const normalizedAnswer = normalizeAnswerText(answerText);
+
+  if (!normalizedAnswer) return "";
+
+  const exactMatch = options.find(option =>
+    normalizeAnswerText(option?.text || "") === normalizedAnswer
+  );
+
+  return exactMatch?.letter?.toUpperCase() || "";
 }
 
 function extractOptions(contentText = "") {
@@ -403,8 +475,8 @@ function extractQuestions(root, options = {}) {
       : [];
 
     const adminAnswers = greenOptions.map(opt => getOptionLetter(opt.innerText)).filter(Boolean);
-    const solutionAnswer = getSolutionAnswer(contentText);
     const opts = extractOptions(contentText);
+    const solutionAnswer = getSolutionAnswer(contentText, opts);
     const videoStatus = hasVideoSolution(contentEl) ? "Attached" : "Missing";
 
     const qnoMatch =
